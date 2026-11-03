@@ -5,7 +5,7 @@
 - `server.js`：旧 HTTP 服务归档；根目录已不再有 `server.js`。
 - `src-bot.js`：旧 `src/bot.js` 归档。
 - `tests/`：旧栈测试归档；新 CI 只跑 `npm test`。
-- `src/`：已退役的 behavior / bilibili / care / corpus / links / proactive / tasks / vision；主路径使用 `plugins/lib/` 的共享实现。
+- `src/`：已退役的 behavior / bilibili / care / corpus / links / proactive / tasks / vision / selfedit；主路径使用 `plugins/lib/` 的共享实现或 DSH 自带能力。
 - `web/`：旧网页控制台。
 - `scripts/`：旧部署/重置/发布脚本。
 - `plugins/whale-fixed-session/`：曾强制 GUI 进入固定 target。
