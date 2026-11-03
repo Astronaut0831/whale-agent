@@ -85,7 +85,7 @@ memory-server :8791
 
 9. `whale-fixed-session` / `whale-gui-input` 已移到 `legacy/plugins`，未安装；仍可能被手工误装。
 10. 仍有 Windows 假设；核心启动脚本已相对化，旧维护脚本还有绝对路径。
-11. 旧 `tests/` 62 个测试未纳入新 CI；新栈测试独立 72 项。
+11. 旧 62 个测试已归档到 `legacy/tests`，不纳入新 CI；新栈测试独立 72 项。
 12. 已有本地 git commit 和 CI 基线；尚未配置 remote/push。
 
 ## 7. 继续方向
