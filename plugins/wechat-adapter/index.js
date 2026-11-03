@@ -26,6 +26,7 @@ import * as tasksStore from '../lib/tasks.js';
 import * as bilibili from '../lib/bilibili.js';
 import * as proactive from '../lib/proactive.js';
 import * as care from '../lib/care.js';
+import * as vision from '../lib/vision.js';
 import { registerMemoryTools } from './lib/memory-tools.js';
 import { recentUserTexts } from './lib/recent-context.js';
 import { setOutboxFile, enqueue, take, ack, resetSending } from './lib/outbox.js';
@@ -34,7 +35,6 @@ import { createGroupPolicy } from './lib/group-policy.js';
 
 const localRequire = createRequire(import.meta.url);
 let loadLegacyConfig = null;
-let legacyVision = null;
 let StickerService = null;
 let DeepSeekClient = null;
 let legacySelfedit = null;
@@ -42,7 +42,6 @@ let legacyUsb = null;
 let legacyStickers = null;
 try {
   loadLegacyConfig = localRequire('../../src/config.js').loadConfig;
-  legacyVision = localRequire('../../src/vision.js');
   StickerService = localRequire('../../src/stickerService.js').StickerService;
   legacyStickers = localRequire('../../src/stickers.js');
   DeepSeekClient = localRequire('../../src/llm.js').DeepSeekClient;
@@ -1405,9 +1404,9 @@ export function apply(ctx, config = {}) {
     }
     if (req.method === 'POST' && url.pathname === '/api/vision') {
       const body = await readJson();
-      if (!legacyVision || !body.image) return sendJson(res, 400, { ok: false, error: 'vision unavailable' });
+      if (!body.image) return sendJson(res, 400, { ok: false, error: 'vision unavailable' });
       try {
-        const text = await legacyVision.describe(visionConfig, {
+        const text = await vision.describe(visionConfig, {
           imageBase64: String(body.image || ''),
           mime: String(body.mime || 'image/jpeg'),
           prompt: String(body.prompt || ''),
