@@ -55,6 +55,8 @@ export function apply(ctx, config = {}) {
   const memoryUrl = String(config.memoryUrl || process.env.WHALE_MEMORY_URL || 'http://127.0.0.1:8791').replace(/\/+$/, '');
   const token = resolveMemoryToken(config) || String(process.env.WHALE_MEMORY_TOKEN || '');
   const seen = new Set();
+  let lastObserveErrorAt = 0;
+  let lastObserveError = '';
 
   ctx.on('session/event', (session, event) => {
     if (!event || event.type !== 'turn/end') return;
@@ -86,7 +88,15 @@ export function apply(ctx, config = {}) {
       headers: { 'content-type': 'application/json', ...(token ? { 'x-bot-token': token } : {}) },
       body: JSON.stringify({ scope, user: observeUser, assistant, ts: Date.now() }),
       signal: AbortSignal.timeout(3000),
-    }).catch(() => {});
+    }).catch((e) => {
+      const msg = String((e && e.message) || e);
+      const now = Date.now();
+      if (msg !== lastObserveError || now - lastObserveErrorAt > 60000) {
+        lastObserveError = msg;
+        lastObserveErrorAt = now;
+        console.error('[memory-core] observe failed: ' + msg);
+      }
+    });
   });
 }
 

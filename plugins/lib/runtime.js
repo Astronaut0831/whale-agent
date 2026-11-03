@@ -11,11 +11,18 @@ export function runtimeFile(config = {}) {
   return fileURLToPath(new URL('../../data/runtime.json', import.meta.url));
 }
 
+const warnedRuntime = new Set();
+
 export function readRuntime(config = {}) {
+  let file = '';
   try {
-    const file = runtimeFile(config);
+    file = runtimeFile(config);
     return JSON.parse(fs.readFileSync(file, 'utf8').replace(/^\uFEFF/, '')) || {};
-  } catch {
+  } catch (e) {
+    if (e && e.code !== 'ENOENT' && file && !warnedRuntime.has(file)) {
+      warnedRuntime.add(file);
+      console.error('[runtime] cannot read ' + file + ': ' + (e.message || e));
+    }
     return {};
   }
 }
