@@ -975,6 +975,10 @@ export function apply(ctx, config = {}) {
   if (groupTopicTimer.unref) groupTopicTimer.unref();
 
   const guiBrokerCache = new Map();
+  const guiInputCache = new Map();
+  const guiInputInflight = new Set();
+  const GUI_INPUT_TTL_MS = 10 * 60 * 1000;
+  const GUI_INPUT_MAX = 200;
   function getGuiBroker(token, g) {
     const key = String(token || '') + '|' + String(g.url || '') + '|' + String(g.sessionId || '');
     let broker = guiBrokerCache.get(key);
@@ -1436,25 +1440,65 @@ export function apply(ctx, config = {}) {
       if (req.method === 'OPTIONS') { res.writeHead(204); return res.end(); }
       if (req.method !== 'POST') return sendJson(res, 405, { ok: false, error: 'POST only' });
       if (!loopback) return sendJson(res, 403, { ok: false, error: 'loopback only' });
+      if (!checkToken({ headers: req.headers, url: req.url }, token)) {
+        return sendJson(res, 401, { ok: false, error: 'bad token' });
+      }
       if (cfg.guiBroker.guiInput !== true || cfg.guiBroker.enabled !== true) {
         return sendJson(res, 404, { ok: false, error: 'gui input disabled' });
       }
       const body = await readJson();
       const text = String(body.text || '').trim();
       if (!text) return sendJson(res, 400, { ok: false, error: 'text required' });
+      const runtimeTarget = String(readRuntime({ runtimeFile: cfg.runtimeFile }).guiSessionId || '');
+      const configuredTarget = String(cfg.guiBroker.sessionId || runtimeTarget || '');
+      const requestedTarget = String(body.sessionId || body.targetSessionId || '').trim();
+      if (!configuredTarget) return sendJson(res, 503, { ok: false, error: 'gui target not configured' });
+      if (requestedTarget && requestedTarget !== configuredTarget) {
+        return sendJson(res, 409, { ok: false, error: 'target session mismatch' });
+      }
+      const targetSessionId = configuredTarget;
+      const idempotencyKey = String(body.idempotencyKey || body.requestId || '').trim().slice(0, 128);
+      if (idempotencyKey) {
+        if (guiInputInflight.has(idempotencyKey)) {
+          return sendJson(res, 409, { ok: false, error: 'duplicate request in flight', idempotencyKey });
+        }
+        const cached = guiInputCache.get(idempotencyKey);
+        if (cached && Date.now() - cached.at < GUI_INPUT_TTL_MS) {
+          return sendJson(res, 200, { ...cached.value, duplicate: true });
+        }
+        guiInputInflight.add(idempotencyKey);
+      }
       try {
         const out = await handleGuiBroker({
           chat_id: 'gui',
           chat_type: 'private',
           sender_id: masterWxid,
-          targetSessionId: String(body.sessionId || ''),
+          targetSessionId,
           text,
         }, { deliver: false });
         if (!out) throw new Error('broker route rejected');
-        log({ kind: 'gui-input', traceId: out.traceId, turn: out.turn, seq: out.seq });
-        return sendJson(res, 200, { ok: true, text: out.text, traceId: out.traceId, turn: out.turn, seq: out.seq });
+        const value = {
+          ok: true,
+          text: out.text,
+          targetSessionId,
+          idempotencyKey: idempotencyKey || undefined,
+          traceId: out.traceId,
+          turn: out.turn,
+          seq: out.seq,
+        };
+        if (idempotencyKey) {
+          guiInputCache.set(idempotencyKey, { at: Date.now(), value });
+          if (guiInputCache.size > GUI_INPUT_MAX) {
+            const oldest = guiInputCache.keys().next().value;
+            if (oldest !== undefined) guiInputCache.delete(oldest);
+          }
+        }
+        log({ kind: 'gui-input', targetSessionId, traceId: out.traceId, turn: out.turn, seq: out.seq, idempotencyKey: idempotencyKey || undefined });
+        return sendJson(res, 200, value);
       } catch (e) {
-        return sendJson(res, 503, { ok: false, error: String(e && e.message) });
+        return sendJson(res, 503, { ok: false, error: String(e && e.message), idempotencyKey: idempotencyKey || undefined });
+      } finally {
+        if (idempotencyKey) guiInputInflight.delete(idempotencyKey);
       }
     }
 
