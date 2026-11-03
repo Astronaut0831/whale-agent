@@ -21,6 +21,8 @@ import { prefsBlock, selfnoteBlock } from '../lib/context-data.js';
 import * as behavior from '../lib/behavior.js';
 import * as prefsStore from '../lib/prefs-store.js';
 import * as links from '../lib/links.js';
+import * as corpus from '../lib/corpus.js';
+import * as tasksStore from '../lib/tasks.js';
 import { registerMemoryTools } from './lib/memory-tools.js';
 import { recentUserTexts } from './lib/recent-context.js';
 import { setOutboxFile, enqueue, take, ack, resetSending } from './lib/outbox.js';
@@ -33,9 +35,7 @@ let legacyVision = null;
 let StickerService = null;
 let legacyCare = null;
 let DeepSeekClient = null;
-let legacyTasks = null;
 let legacyBilibili = null;
-let legacyCorpus = null;
 let legacyProactive = null;
 let legacySelfedit = null;
 let legacyUsb = null;
@@ -47,9 +47,7 @@ try {
   legacyStickers = localRequire('../../src/stickers.js');
   legacyCare = localRequire('../../src/care.js');
   DeepSeekClient = localRequire('../../src/llm.js').DeepSeekClient;
-  legacyTasks = localRequire('../../src/tasks.js');
   legacyBilibili = localRequire('../../src/bilibili.js');
-  legacyCorpus = localRequire('../../src/corpus.js');
   legacyProactive = localRequire('../../src/proactive.js');
   legacySelfedit = localRequire('../../src/selfedit.js');
   legacyUsb = localRequire('../../src/usb.js');
@@ -221,7 +219,7 @@ export function apply(ctx, config = {}) {
     if (!r.ok || d.ok === false) throw new Error(d.error || ('memory HTTP ' + r.status));
     return d;
   };
-  if (legacyCorpus) { try { legacyCorpus.setDataDir(cfg.dataDir); } catch { /* ignore */ } }
+  corpus.setDataDir(cfg.dataDir)
   if (legacyProactive) { try { legacyProactive.setDataDir(cfg.dataDir); } catch { /* ignore */ } }
   if (legacySelfedit) { try { legacySelfedit.setDataDir(cfg.dataDir); } catch { /* ignore */ } }
   if (behavior) { try { behavior.setDataDir(cfg.dataDir); } catch { /* ignore */ } }
@@ -269,10 +267,10 @@ export function apply(ctx, config = {}) {
     }
   };
 
-  if (legacyTasks) {
+  if (tasksStore) {
     try {
-      legacyTasks.setDataDir(cfg.dataDir);
-      const n = legacyTasks.markInterrupted();
+      tasksStore.setDataDir(cfg.dataDir);
+      const n = tasksStore.markInterrupted();
       if (n) log({ kind: 'task-interrupted', count: n });
     } catch { /* ignore */ }
   }
@@ -316,7 +314,7 @@ export function apply(ctx, config = {}) {
   }
 
   async function handleTaskCommand(payload) {
-    if (!legacyTasks) return null;
+    if (!tasksStore) return null;
     const text = String(payload.text || payload.content || '').trim();
     if (!/^\/task(?:\s|$)/i.test(text)) return null;
     const chatId = String(payload.chat_id || payload.chatId || '');
@@ -325,23 +323,23 @@ export function apply(ctx, config = {}) {
     if (sender !== masterWxid) return taskReply(chatId, chatType, '派活只有主人能做。');
     const arg = text.replace(/^\/task\s*/i, '').trim();
     if (!arg || arg === 'list' || arg === '列表') {
-      const items = legacyTasks.list(5);
+      const items = tasksStore.list(5);
       if (!items.length) return taskReply(chatId, chatType, '现在没有任务。');
       const body = items.map((t) => t.id.slice(-6) + ' [' + t.status + '] ' + String(t.instruction).slice(0, 30)).join('\n');
       return taskReply(chatId, chatType, '最近的任务：\n' + body);
     }
     if (arg === 'cancel' || arg === '取消') {
-      const n = legacyTasks.cancelAll();
+      const n = tasksStore.cancelAll();
       return taskReply(chatId, chatType, n ? '停了 ' + n + ' 个任务。' : '没有在跑的任务。');
     }
     const idMatch = arg.match(/^(cancel|取消)\s+(\w+)/i);
     if (idMatch) {
-      const hit = legacyTasks.list(20).find((t) => String(t.id).endsWith(idMatch[2]));
+      const hit = tasksStore.list(20).find((t) => String(t.id).endsWith(idMatch[2]));
       if (!hit) return taskReply(chatId, chatType, '没找到这个任务。');
-      legacyTasks.cancel(hit.id);
+      tasksStore.cancel(hit.id);
       return taskReply(chatId, chatType, '停了：' + String(hit.instruction).slice(0, 30));
     }
-    const t = legacyTasks.enqueue({ chatId, chatType, ownerId: sender, instruction: arg });
+    const t = tasksStore.enqueue({ chatId, chatType, ownerId: sender, instruction: arg });
     return taskReply(chatId, chatType, '行，我后台弄（' + t.id.slice(-6) + '），好了叫你。');
   }
 
@@ -502,7 +500,7 @@ export function apply(ctx, config = {}) {
         if (visionConfig.wechat) visionConfig.wechat.groupSettings = conf.wechat.groupSettings;
         return taskReply(chatId, chatType, sub === 'on' || sub === '开' ? '开了，这个群的语料我开始攒（不影响回话）。' : '关了，不攒这个群的语料了。');
       }
-      const st = legacyCorpus ? legacyCorpus.stats(chatId) : { exists: false, lines: 0, bytes: 0 };
+      const st = corpus.stats(chatId);
       return taskReply(chatId, chatType, '这个群的语料：' + (cur.collect !== false ? '收集中' : '已关闭') + '\n'
         + (st.exists ? '已存 ' + st.lines + ' 条 / ' + (st.bytes / 1024).toFixed(1) + ' KB' : '还没有数据')
         + '\n（/corpus on 或 off）');
@@ -1068,11 +1066,11 @@ export function apply(ctx, config = {}) {
   }
 
   let taskBusy = false;
-  const taskTimer = legacyTasks ? setInterval(async () => {
+  const taskTimer = tasksStore ? setInterval(async () => {
     if (taskBusy) return;
     if (!readOnline()) return;
     let item;
-    try { item = legacyTasks.next(); } catch { item = null; }
+    try { item = tasksStore.next(); } catch { item = null; }
     if (!item) return;
     taskBusy = true;
     try {
@@ -1093,19 +1091,19 @@ export function apply(ctx, config = {}) {
           WHALE_IS_MASTER: item.ownerId === masterWxid ? '1' : '0',
         },
       });
-      const latest = legacyTasks.get(item.id);
+      const latest = tasksStore.get(item.id);
       if (latest && latest.cancelled) {
-        legacyTasks.update(item.id, { status: 'cancelled', endedAt: Date.now(), result: '' });
+        tasksStore.update(item.id, { status: 'cancelled', endedAt: Date.now(), result: '' });
         enqueue({ chatId: item.chatId, chatType: item.chatType, kind: 'text', text: '任务已取消。' });
       } else {
         const text = String(out.text || '').trim();
-        legacyTasks.update(item.id, { status: 'done', endedAt: Date.now(), result: text.slice(0, 4000) });
+        tasksStore.update(item.id, { status: 'done', endedAt: Date.now(), result: text.slice(0, 4000) });
         for (const b of splitBubbles('【任务完成】\n' + text)) {
           enqueue({ chatId: item.chatId, chatType: item.chatType, kind: 'text', text: b });
         }
       }
     } catch (e) {
-      legacyTasks.update(item.id, { status: 'failed', endedAt: Date.now(), error: String(e && e.message).slice(0, 500) });
+      tasksStore.update(item.id, { status: 'failed', endedAt: Date.now(), error: String(e && e.message).slice(0, 500) });
       enqueue({ chatId: item.chatId, chatType: item.chatType, kind: 'text', text: '任务失败：' + String(e && e.message).slice(0, 200) });
     } finally {
       taskBusy = false;
@@ -1114,10 +1112,10 @@ export function apply(ctx, config = {}) {
   if (taskTimer && taskTimer.unref) taskTimer.unref();
 
   const groupCollect = (msg) => {
-    if (!legacyCorpus || !msg.text || String(msg.text).startsWith('/')) return;
+    if (!msg.text || String(msg.text).startsWith('/')) return;
     const gs = ((visionConfig.wechat || {}).groupSettings || {})[msg.chatId] || {};
     if (gs.collect === false) return;
-    legacyCorpus.append(msg.chatId, { ts: msg.ts, name: msg.senderName, uid: msg.senderId, text: msg.text });
+    corpus.append(msg.chatId, { ts: msg.ts, name: msg.senderName, uid: msg.senderId, text: msg.text });
   };
 
   const collectSticker = async (payload) => {
@@ -1573,7 +1571,7 @@ export function apply(ctx, config = {}) {
       let stickers = { enabled: false };
       try { stickers = stickerService ? stickerService.status() : stickers; } catch { /* disabled */ }
       let tasks = [];
-      try { tasks = legacyTasks ? legacyTasks.list(5).map((t) => ({ id: t.id, status: t.status, instruction: String(t.instruction).slice(0, 40) })) : []; } catch { /* ignore */ }
+      try { tasks = tasksStore.list(5).map((t) => ({ id: t.id, status: t.status, instruction: String(t.instruction).slice(0, 40) })); } catch { /* ignore */ }
       return sendJson(res, 200, {
         ok: true,
         service: 'wechat-adapter',
