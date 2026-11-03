@@ -69,14 +69,14 @@ memory-server :8791
 
 ### P0
 
-1. target/token 已支持 `data/runtime.json`，profile 留空；GUI 已重启并加载 web profile，但 target 行为探针尚未得到可判定结果。
+1. target/token 已支持 `data/runtime.json`；BOM 读取问题已修复，GUI 重启后的 target system prompt 已包含 persona 和【记忆使用】规则。
 2. 根目录 `server.js`、`src/bot.js`、旧 tests 已归档到 `legacy/`；主路径不再保留可启动旧栈。
 3. 备份已补 episodes/digest/narrative，但真实恢复演练仍是手动的。
 4. `isMaster` 已改为真实 sender；仍需端到端非主人权限回归。
 
 ### P1
 
-5. GUI target 已接入 `whale-system-context`；profile 已加载，target 工具记录存在，但行为级 system-context 验收未完成；其它 GUI 会话仍按设计不注入。
+5. GUI target 已验收：system prompt 同时含 persona 和【记忆使用】规则，memory_recall 已注册；其它 GUI 会话仍按设计不注入。
 6. `care` 是实际读者；`proactive.care` 无读者，已从 config.example 删除，运行中的 config.json 仍可手工清理。
 7. 普通 headless 与 task profile 两份配置需要手工同步。
 8. `legacy/` 集中存放 server.js、src-bot.js、旧 tests/web/scripts/plugins；主路径不依赖。

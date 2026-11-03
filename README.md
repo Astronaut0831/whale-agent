@@ -53,7 +53,7 @@ memory-server :8791
 - GUI 输入还没有统一走 broker（P3 未完成；不要重新安装固定 target 的 GUI 插件）
 - 非主人私聊、群主动话题、真实 `/dl` 还没有完成全部真实验收
 - 旧 `server.js` / `src/bot.js` / 旧 tests / 旧 web / 旧 deploy scripts 已归档到 `legacy/`，主路径不依赖
-- target/token 已迁移到 `data/runtime.json`（profile 只留空 fallback）；GUI 已重启，target system-context 仍需行为级验收
+- target/token 已迁移到 `data/runtime.json`（profile 只留空 fallback）；GUI target 的 persona + system-context 已在重启后 system prompt 中验证
 - 备份已补齐 memory 原始文件；仍需定期做真实恢复演练
 - 语音、天气、媒体、旧 Web UI：optional / retired
 
