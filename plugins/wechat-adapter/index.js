@@ -20,6 +20,7 @@ import { readRuntime, repoRoot } from '../lib/runtime.js';
 import { prefsBlock, selfnoteBlock } from '../lib/context-data.js';
 import * as behavior from '../lib/behavior.js';
 import * as prefsStore from '../lib/prefs-store.js';
+import * as links from '../lib/links.js';
 import { registerMemoryTools } from './lib/memory-tools.js';
 import { recentUserTexts } from './lib/recent-context.js';
 import { setOutboxFile, enqueue, take, ack, resetSending } from './lib/outbox.js';
@@ -34,7 +35,6 @@ let legacyCare = null;
 let DeepSeekClient = null;
 let legacyTasks = null;
 let legacyBilibili = null;
-let legacyLinks = null;
 let legacyCorpus = null;
 let legacyProactive = null;
 let legacySelfedit = null;
@@ -49,7 +49,6 @@ try {
   DeepSeekClient = localRequire('../../src/llm.js').DeepSeekClient;
   legacyTasks = localRequire('../../src/tasks.js');
   legacyBilibili = localRequire('../../src/bilibili.js');
-  legacyLinks = localRequire('../../src/links.js');
   legacyCorpus = localRequire('../../src/corpus.js');
   legacyProactive = localRequire('../../src/proactive.js');
   legacySelfedit = localRequire('../../src/selfedit.js');
@@ -1677,10 +1676,10 @@ export function apply(ctx, config = {}) {
             if (cfg.runner === 'headless') {
               let linkBlock = '';
               try {
-                const urls = legacyLinks ? legacyLinks.extractUrls(String(rawText || '')) : [];
+                const urls = links.extractUrls(String(rawText || ''));
                 for (const u of urls.slice(0, 2)) {
-                  const info = await legacyLinks.describeLink(u, { timeoutMs: 6000 });
-                  const piece = legacyLinks.formatForPrompt(info);
+                  const info = await links.describeLink(u, { timeoutMs: 6000 });
+                  const piece = links.formatForPrompt(info);
                   if (piece) linkBlock += (linkBlock ? '\n\n' : '') + piece;
                 }
               } catch { /* link failure must not block chat */ }
