@@ -55,3 +55,17 @@ test('targetSessionId 为空时从 runtime 解析 target', () => {
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('turn/start reattaches context to an existing target agent', () => {
+  const events = {};
+  const sections = [];
+  const agent = { session: { id: 'resumed-target' }, ctx: { systemPrompt: { section: (s) => sections.push(s) } } };
+  apply({
+    systemPrompt: { section: () => {} },
+    agents: { get: (id) => (id === 'resumed-target' ? agent : null) },
+    on: (name, cb) => { events[name] = cb; },
+  }, { targetSessionId: 'resumed-target', env: { WHALE_PREFS_BLOCK: '规则S' } });
+  events['session/event']({ id: 'resumed-target' }, { type: 'turn/start' });
+  assert.equal(sections.length, 1);
+  assert.match(sections[0].text, /规则S/);
+});
