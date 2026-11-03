@@ -1545,6 +1545,15 @@ export function apply(ctx, config = {}) {
         if (brokerOut) return sendJson(res, 200, brokerOut);
       } catch (e) {
         log({ kind: 'gui-broker-fail', error: String(e && e.message).slice(0, 200) });
+        // A configured GUI broker must fail closed. Falling through to headless
+        // would silently move master private chat into wechat:u:<master> and
+        // split the GUI/WeChat memory scope.
+        const brokerCfg = cfg.guiBroker || {};
+        const sender = String(payload.sender_id || payload.senderId || '');
+        const privateChat = String(payload.chat_type || payload.chatType || 'private') !== 'group';
+        if (brokerCfg.enabled === true && privateChat && sender === masterWxid) {
+          return sendJson(res, 503, { ok: false, error: 'gui broker unavailable; message not routed' });
+        }
       }
 
       try {
