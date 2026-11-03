@@ -24,6 +24,7 @@ import * as links from '../lib/links.js';
 import * as corpus from '../lib/corpus.js';
 import * as tasksStore from '../lib/tasks.js';
 import * as bilibili from '../lib/bilibili.js';
+import * as proactive from '../lib/proactive.js';
 import { registerMemoryTools } from './lib/memory-tools.js';
 import { recentUserTexts } from './lib/recent-context.js';
 import { setOutboxFile, enqueue, take, ack, resetSending } from './lib/outbox.js';
@@ -36,7 +37,6 @@ let legacyVision = null;
 let StickerService = null;
 let legacyCare = null;
 let DeepSeekClient = null;
-let legacyProactive = null;
 let legacySelfedit = null;
 let legacyUsb = null;
 let legacyStickers = null;
@@ -47,7 +47,6 @@ try {
   legacyStickers = localRequire('../../src/stickers.js');
   legacyCare = localRequire('../../src/care.js');
   DeepSeekClient = localRequire('../../src/llm.js').DeepSeekClient;
-  legacyProactive = localRequire('../../src/proactive.js');
   legacySelfedit = localRequire('../../src/selfedit.js');
   legacyUsb = localRequire('../../src/usb.js');
 } catch { /* optional legacy features */ }
@@ -219,7 +218,7 @@ export function apply(ctx, config = {}) {
     return d;
   };
   corpus.setDataDir(cfg.dataDir)
-  if (legacyProactive) { try { legacyProactive.setDataDir(cfg.dataDir); } catch { /* ignore */ } }
+  proactive.setDataDir(cfg.dataDir)
   if (legacySelfedit) { try { legacySelfedit.setDataDir(cfg.dataDir); } catch { /* ignore */ } }
   if (behavior) { try { behavior.setDataDir(cfg.dataDir); } catch { /* ignore */ } }
   if (prefsStore) { try { prefsStore.setDataDir(cfg.dataDir); } catch { /* ignore */ } }
@@ -551,14 +550,14 @@ export function apply(ctx, config = {}) {
 
     if (cmd === 'remind') {
       if (!isMaster) return taskReply(chatId, chatType, '提醒只有主人能用。');
-      if (!legacyProactive) return taskReply(chatId, chatType, '提醒服务不可用。');
+      if (!proactive) return taskReply(chatId, chatType, '提醒服务不可用。');
       const sub = String(arg || '').trim().toLowerCase();
       if (sub === 'cancel' || sub === '取消') {
-        const list = legacyProactive.listReminders();
-        for (const x of list) legacyProactive.cancelReminder(x.id);
+        const list = proactive.listReminders();
+        for (const x of list) proactive.cancelReminder(x.id);
         return taskReply(chatId, chatType, list.length ? '清了 ' + list.length + ' 条提醒。' : '没有待提醒的事。');
       }
-      const list = legacyProactive.listReminders();
+      const list = proactive.listReminders();
       if (!list.length) return taskReply(chatId, chatType, '没有待提醒的事。');
       return taskReply(chatId, chatType, '待提醒：\n' + list.slice(0, 8).map((x) => {
         const d = new Date(x.due);
@@ -901,16 +900,16 @@ export function apply(ctx, config = {}) {
   }
 
   async function handleReminderIntent(payload) {
-    if (!legacyProactive || !careLlm || careLlm.isMock) return null;
+    if (!proactive || !careLlm || careLlm.isMock) return null;
     const text = String(payload.text || payload.content || '').trim();
     if (!/(提醒我|记得提醒|到点叫|叫我起来|别忘提醒)/.test(text)) return null;
     const chatType = taskChatType(payload);
     const sender = String(payload.sender_id || payload.senderId || '');
     if (chatType !== 'private' || sender !== masterWxid) return null;
     try {
-      const parsed = await legacyProactive.parseReminder(careLlm, text);
+      const parsed = await proactive.parseReminder(careLlm, text);
       if (!parsed) return null;
-      const item = legacyProactive.addReminder({
+      const item = proactive.addReminder({
         chatId: String(payload.chat_id || payload.chatId || ''),
         ownerId: sender,
         due: parsed.due,
@@ -922,11 +921,11 @@ export function apply(ctx, config = {}) {
     } catch { return null; }
   }
 
-  if (legacyProactive) {
+  if (proactive) {
     const reminderTimer = setInterval(() => {
       if (!readOnline()) return;
       let due = [];
-      try { due = legacyProactive.dueReminders(); } catch { return; }
+      try { due = proactive.dueReminders(); } catch { return; }
       for (const r of due) {
         try {
           enqueue({ chatId: r.chatId, chatType: 'private', kind: 'text', text: '主人，到点了——' + r.what });
@@ -938,7 +937,7 @@ export function apply(ctx, config = {}) {
 
   let groupTopicBusy = false;
   const groupTopicTimer = setInterval(async () => {
-    if (groupTopicBusy || !groupProactiveArmed || !legacyProactive || !careLlm || careLlm.isMock) return;
+    if (groupTopicBusy || !groupProactiveArmed || !proactive || !careLlm || careLlm.isMock) return;
     if (!readOnline()) return;
     groupTopicBusy = true;
     try {
@@ -946,7 +945,7 @@ export function apply(ctx, config = {}) {
       for (const chatId of groups) {
         const hist = groupHistory.load(chatId, 30) || [];
         const lastAt = Number((hist[hist.length - 1] || {}).ts) || 0;
-        if (!legacyProactive.groupTopicAllowed(visionConfig, 'wechat:g:' + chatId, lastAt)) continue;
+        if (!proactive.groupTopicAllowed(visionConfig, 'wechat:g:' + chatId, lastAt)) continue;
         const recent = hist.filter((m) => m.role === 'user' && m.text).slice(-8).map((m) => (m.name || '群友') + '：' + String(m.text).slice(0, 80)).join('\n');
         const out = await careLlm.complete({
           system: '你是群聊里的鲸鲸。根据最近的群聊内容，只输出一句适合现在发到群里的话（不超过25字，像随口加入聊天，别打招呼，别说教，别用引号，不要解释）。',
@@ -957,7 +956,7 @@ export function apply(ctx, config = {}) {
         const line = String(out || '').split(/\n+/).map((x) => x.trim()).filter(Boolean).slice(-1)[0] || '';
         const text = line.replace(/^["'「」]|["'「」]$/g, '').slice(0, 40);
         if (text.length < 4) continue;
-        legacyProactive.markGroupSent('wechat:g:' + chatId);
+        proactive.markGroupSent('wechat:g:' + chatId);
         enqueue({ chatId, chatType: 'group', kind: 'text', text });
         log({ kind: 'group-topic', chatId, text });
       }
