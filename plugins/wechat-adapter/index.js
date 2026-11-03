@@ -25,6 +25,7 @@ import * as corpus from '../lib/corpus.js';
 import * as tasksStore from '../lib/tasks.js';
 import * as bilibili from '../lib/bilibili.js';
 import * as proactive from '../lib/proactive.js';
+import * as care from '../lib/care.js';
 import { registerMemoryTools } from './lib/memory-tools.js';
 import { recentUserTexts } from './lib/recent-context.js';
 import { setOutboxFile, enqueue, take, ack, resetSending } from './lib/outbox.js';
@@ -35,7 +36,6 @@ const localRequire = createRequire(import.meta.url);
 let loadLegacyConfig = null;
 let legacyVision = null;
 let StickerService = null;
-let legacyCare = null;
 let DeepSeekClient = null;
 let legacySelfedit = null;
 let legacyUsb = null;
@@ -45,7 +45,6 @@ try {
   legacyVision = localRequire('../../src/vision.js');
   StickerService = localRequire('../../src/stickerService.js').StickerService;
   legacyStickers = localRequire('../../src/stickers.js');
-  legacyCare = localRequire('../../src/care.js');
   DeepSeekClient = localRequire('../../src/llm.js').DeepSeekClient;
   legacySelfedit = localRequire('../../src/selfedit.js');
   legacyUsb = localRequire('../../src/usb.js');
@@ -1230,12 +1229,12 @@ export function apply(ctx, config = {}) {
       return sendJson(res, 200, { ok: true });
     }
     if (req.method === 'GET' && url.pathname === '/api/care/due') {
-      if (!legacyCare) return sendJson(res, 200, { ok: true, due: false });
+      
       if (!readOnline()) return sendJson(res, 200, { ok: true, due: false, reason: 'offline' });
       const last = Number(url.searchParams.get('last') || 0);
       const sentToday = Number(url.searchParams.get('sentToday') || 0);
       try {
-        let out = legacyCare.careDue(visionConfig, {
+        let out = care.careDue(visionConfig, {
           lastSentTs: Number.isFinite(last) && last > 0 ? last : 0,
           sentToday: Number.isFinite(sentToday) ? sentToday : 0,
         });
@@ -1283,23 +1282,23 @@ export function apply(ctx, config = {}) {
       }
     }
     if (req.method === 'GET' && url.pathname === '/api/care') {
-      if (!legacyCare) return sendJson(res, 200, { ok: true, text: '' });
+      
       try {
         const personaCfg = visionConfig.persona || {};
         let text;
         if (!careLlm || careLlm.isMock) {
-          text = legacyCare.pickTemplate();
+          text = care.pickTemplate();
         } else {
-          const { system, user } = legacyCare.buildCarePrompt({
+          const { system, user } = care.buildCarePrompt({
             persona: personaCfg, recent: [], name: String(personaCfg.ownerName || '主人'), hour: new Date().getHours(),
           });
           const raw = await careLlm.complete({ system, turns: [{ role: 'user', content: user }] });
-          text = legacyCare.cleanCareText(raw) || legacyCare.pickTemplate();
+          text = care.cleanCareText(raw) || care.pickTemplate();
         }
         careDecision = { at: 0, due: false, reason: '' };
         return sendJson(res, 200, { ok: true, text });
       } catch (e) {
-        return sendJson(res, 200, { ok: true, text: legacyCare.pickTemplate(), fallback: true });
+        return sendJson(res, 200, { ok: true, text: care.pickTemplate(), fallback: true });
       }
     }
     if (url.pathname === '/api/stickers/status' && req.method === 'GET') {
