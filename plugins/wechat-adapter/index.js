@@ -17,6 +17,7 @@ import { runHeadlessTurn } from './lib/headless.js';
 import { createGuiBroker, extractTokenFromLog } from './lib/gui-broker.js';
 import { withLease } from './lib/session-lease.js';
 import { readRuntime, repoRoot } from '../lib/runtime.js';
+import { prefsBlock, selfnoteBlock } from '../lib/context-data.js';
 import { registerMemoryTools } from './lib/memory-tools.js';
 import { recentUserTexts } from './lib/recent-context.js';
 import { setOutboxFile, enqueue, take, ack, resetSending } from './lib/outbox.js';
@@ -34,7 +35,6 @@ let legacyBilibili = null;
 let legacyLinks = null;
 let legacyCorpus = null;
 let legacyProactive = null;
-let legacySelfnote = null;
 let legacySelfedit = null;
 let legacyBehavior = null;
 let legacyPrefs = null;
@@ -52,7 +52,6 @@ try {
   legacyLinks = localRequire('../../src/links.js');
   legacyCorpus = localRequire('../../src/corpus.js');
   legacyProactive = localRequire('../../src/proactive.js');
-  legacySelfnote = localRequire('../../src/selfnote.js');
   legacySelfedit = localRequire('../../src/selfedit.js');
   legacyBehavior = localRequire('../../src/behavior.js');
   legacyPrefs = localRequire('../../src/prefs.js');
@@ -226,7 +225,6 @@ export function apply(ctx, config = {}) {
   };
   if (legacyCorpus) { try { legacyCorpus.setDataDir(cfg.dataDir); } catch { /* ignore */ } }
   if (legacyProactive) { try { legacyProactive.setDataDir(cfg.dataDir); } catch { /* ignore */ } }
-  if (legacySelfnote) { try { legacySelfnote.setDataDir(cfg.dataDir); } catch { /* ignore */ } }
   if (legacySelfedit) { try { legacySelfedit.setDataDir(cfg.dataDir); } catch { /* ignore */ } }
   if (legacyBehavior) { try { legacyBehavior.setDataDir(cfg.dataDir); } catch { /* ignore */ } }
   if (legacyPrefs) { try { legacyPrefs.setDataDir(cfg.dataDir); } catch { /* ignore */ } }
@@ -249,13 +247,12 @@ export function apply(ctx, config = {}) {
     try { return JSON.parse(fs.readFileSync(cfg.selfnoteStateFile, 'utf8')) || {}; } catch { return {}; }
   })();
   const selfnoteBlockFor = (scope) => {
-    if (!legacySelfnote) return '';
     const now = Date.now();
     const last = Number(selfnoteState[scope] || 0);
     const first = !last;
     let block = '';
     if (first || now - last > 2 * 3600 * 1000) {
-      try { block = legacySelfnote.block(5) || ''; } catch { block = ''; }
+      block = selfnoteBlock({ n: 5, dataDir: cfg.dataDir });
     }
     selfnoteState[scope] = now;
     try { fs.writeFileSync(cfg.selfnoteStateFile, JSON.stringify(selfnoteState), 'utf8'); } catch { /* ignore */ }
@@ -1592,7 +1589,7 @@ export function apply(ctx, config = {}) {
                 }
               } catch { /* link failure must not block chat */ }
               const selfBlock = selfnoteBlockFor(sessionKey);
-              const prefBlock = legacyPrefs ? legacyPrefs.renderAll({ max: 12 }) : '';
+              const prefBlock = prefsBlock({ max: 12, dataDir: cfg.dataDir });
               return runHeadlessTurn({
                 sessionKey, message: (linkBlock ? linkBlock + '\n\n' : '') + message,
                 store, profile: cfg.headlessProfile, timeoutMs: cfg.headlessTimeoutMs,
