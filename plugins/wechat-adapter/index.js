@@ -23,6 +23,7 @@ import * as prefsStore from '../lib/prefs-store.js';
 import * as links from '../lib/links.js';
 import * as corpus from '../lib/corpus.js';
 import * as tasksStore from '../lib/tasks.js';
+import * as bilibili from '../lib/bilibili.js';
 import { registerMemoryTools } from './lib/memory-tools.js';
 import { recentUserTexts } from './lib/recent-context.js';
 import { setOutboxFile, enqueue, take, ack, resetSending } from './lib/outbox.js';
@@ -35,7 +36,6 @@ let legacyVision = null;
 let StickerService = null;
 let legacyCare = null;
 let DeepSeekClient = null;
-let legacyBilibili = null;
 let legacyProactive = null;
 let legacySelfedit = null;
 let legacyUsb = null;
@@ -47,7 +47,6 @@ try {
   legacyStickers = localRequire('../../src/stickers.js');
   legacyCare = localRequire('../../src/care.js');
   DeepSeekClient = localRequire('../../src/llm.js').DeepSeekClient;
-  legacyBilibili = localRequire('../../src/bilibili.js');
   legacyProactive = localRequire('../../src/proactive.js');
   legacySelfedit = localRequire('../../src/selfedit.js');
   legacyUsb = localRequire('../../src/usb.js');
@@ -1162,7 +1161,7 @@ export function apply(ctx, config = {}) {
   };
 
   const shareForChat = async (chatId) => {
-    if (!legacyBilibili) return { ok: true, video: null, topic: '', reason: 'no_source' };
+    
     const load = (groupHistory && typeof groupHistory.load === 'function') ? groupHistory.load(chatId, 30) : [];
     const texts = (load || []).filter((m) => m.role === 'user' && m.text).map((m) => String(m.text).slice(0, 120));
     let topic = '';
@@ -1180,10 +1179,10 @@ export function apply(ctx, config = {}) {
       ? cfgShare.sources.map((s) => String(s || '').trim().toLowerCase()).filter(Boolean)
       : ['bilibili'];
     if (!sources.includes('bilibili')) return { ok: true, video: null, topic, reason: 'no_source', sources };
-    let video = topic ? await legacyBilibili.pickByKeyword(visionConfig, topic) : null;
-    if (!video) video = await legacyBilibili.pickVideo(visionConfig);
+    let video = topic ? await bilibili.pickByKeyword(visionConfig, topic) : null;
+    if (!video) video = await bilibili.pickVideo(visionConfig);
     if (!video) return { ok: true, video: null, topic };
-    const comments = await legacyBilibili.fetchComments(video.bvid, 5);
+    const comments = await bilibili.fetchComments(video.bvid, 5);
     let comment = '';
     if (careLlm && !careLlm.isMock) {
       try {
