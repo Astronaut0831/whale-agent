@@ -1011,7 +1011,8 @@ export function apply(ctx, config = {}) {
       name: 'wechat-image',
     }] : [];
     const chatId = String(payload.chat_id || payload.chatId || '');
-    const targetSessionId = String(payload.targetSessionId || payload.sessionId || g.sessionId || '');
+    const runtimeTarget = g.sessionId ? '' : String(readRuntime({ runtimeFile: cfg.runtimeFile }).guiSessionId || '');
+    const targetSessionId = String(payload.targetSessionId || payload.sessionId || g.sessionId || runtimeTarget || '');
     if (!targetSessionId || !g.url) throw new Error('gui broker config incomplete');
     const bg = { ...g, sessionId: targetSessionId };
 

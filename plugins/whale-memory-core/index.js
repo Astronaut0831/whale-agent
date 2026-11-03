@@ -54,8 +54,6 @@ export function resolveScope(sessionId, config = {}, envScope = '') {
 export function apply(ctx, config = {}) {
   const memoryUrl = String(config.memoryUrl || process.env.WHALE_MEMORY_URL || 'http://127.0.0.1:8791').replace(/\/+$/, '');
   const token = resolveMemoryToken(config) || String(process.env.WHALE_MEMORY_TOKEN || '');
-  const targetSessionId = resolveTarget(config);
-  const effective = { ...config, targetSessionId };
   const seen = new Set();
 
   ctx.on('session/event', (session, event) => {
@@ -63,7 +61,8 @@ export function apply(ctx, config = {}) {
     const reason = event.data && event.data.reason;
     if (reason && reason.kind && reason.kind !== 'completed') return;
     // 微信 headless：环境变量 scope 优先，保持原行为。
-    // GUI：没有 env 时只允许配置的目标 session，其他 GUI 会话完全无副作用。
+    // GUI：没有 env 时只允许配置/ runtime state 里的目标 session。
+    const effective = { ...config, targetSessionId: resolveTarget(config) };
     const scope = resolveScope(session && session.id, effective, process.env.WHALE_SESSION_SCOPE);
     if (!scope || !session) return;
     const turn = event.data && event.data.turn;

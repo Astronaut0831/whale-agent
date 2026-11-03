@@ -41,17 +41,15 @@ function addSection(systemPrompt, text) {
 
 export function apply(ctx, config = {}) {
   const hasTargetConfig = Object.prototype.hasOwnProperty.call(config, 'targetSessionId');
-  const target = hasTargetConfig ? resolveTarget(config) : '';
-  if (!target) {
+  if (!hasTargetConfig) {
     // headless profile: no target field, profile-wide system section.
-    // GUI profile with an explicit empty target: do not leak into other sessions.
-    if (hasTargetConfig) return;
     addSection(ctx.systemPrompt, buildContextText(config.env || process.env));
     return;
   }
   ctx.on('agent/created', ({ agent } = {}) => {
+    const target = resolveTarget(config);
     const sid = agent && agent.session && agent.session.id;
-    if (!sid || String(sid) !== target) return;
+    if (!target || !sid || String(sid) !== target) return;
     addSection(agent.ctx && agent.ctx.systemPrompt, legacyContextText(config.env || process.env));
   });
 }
