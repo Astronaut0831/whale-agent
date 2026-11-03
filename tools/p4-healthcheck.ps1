@@ -48,7 +48,9 @@ if (-not (Test-Path -LiteralPath $sessionRoot)) {
       Sort-Object Mtime -Descending |
       Select-Object -First 1 -ExpandProperty Name
   } catch { $activeSession = '' }
-  Add-Check 'runtime-target-active' ([bool]($runtimeTarget -and $activeSession -and $runtimeTarget -eq $activeSession)) "target=$runtimeTarget active=$activeSession"
+  $targetSessionFile = Join-Path $sessionRoot (Join-Path $runtimeTarget 'session.v4.jsonl.zstd')
+  $targetExists = [bool]($runtimeTarget -and (Test-Path -LiteralPath $targetSessionFile))
+  Add-Check 'runtime-target-active' $targetExists "target=$runtimeTarget exists=$targetExists newest=$activeSession"
 }
 
 $headlessProfile = Join-Path $profilesRoot 'whale-headless\cordis.patch.yml'

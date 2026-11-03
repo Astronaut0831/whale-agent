@@ -108,21 +108,6 @@ test('/remind 空列表', async () => {
   }
 });
 
-test('/selfedit status 返回开关', async () => {
-  const { dir, server, base } = await setup();
-  try {
-    const r = await cmd(base, {
-      chat_id: 'wxid_master', chat_type: 'private', msg_id: 'c5',
-      sender_id: 'wxid_master', text: '/selfedit status',
-    });
-    assert.equal(r.status, 200);
-    assert.match(r.data.bubbles[0], /代码自改：/);
-  } finally {
-    server.close();
-    fs.rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
-  }
-});
-
 test('/behavior 和 /pref list 可用', async () => {
   const { dir, server, base } = await setup();
   try {

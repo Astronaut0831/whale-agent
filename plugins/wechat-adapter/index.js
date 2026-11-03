@@ -19,7 +19,6 @@ import { withLease } from './lib/session-lease.js';
 import { readRuntime, repoRoot } from '../lib/runtime.js';
 import { prefsBlock, selfnoteBlock } from '../lib/context-data.js';
 import * as behavior from '../lib/behavior.js';
-import * as prefsStore from '../lib/prefs-store.js';
 import * as links from '../lib/links.js';
 import * as corpus from '../lib/corpus.js';
 import * as tasksStore from '../lib/tasks.js';
@@ -37,7 +36,7 @@ const localRequire = createRequire(import.meta.url);
 let loadLegacyConfig = null;
 let StickerService = null;
 let DeepSeekClient = null;
-let legacySelfedit = null;
+let legacyPrefs = null;
 let legacyUsb = null;
 let legacyStickers = null;
 try {
@@ -45,7 +44,7 @@ try {
   StickerService = localRequire('../../src/stickerService.js').StickerService;
   legacyStickers = localRequire('../../src/stickers.js');
   DeepSeekClient = localRequire('../../src/llm.js').DeepSeekClient;
-  legacySelfedit = localRequire('../../src/selfedit.js');
+  legacyPrefs = localRequire('../../src/prefs.js');
   legacyUsb = localRequire('../../src/usb.js');
 } catch { /* optional legacy features */ }
 
@@ -217,9 +216,8 @@ export function apply(ctx, config = {}) {
   };
   corpus.setDataDir(cfg.dataDir)
   proactive.setDataDir(cfg.dataDir)
-  if (legacySelfedit) { try { legacySelfedit.setDataDir(cfg.dataDir); } catch { /* ignore */ } }
-  if (behavior) { try { behavior.setDataDir(cfg.dataDir); } catch { /* ignore */ } }
-  if (prefsStore) { try { prefsStore.setDataDir(cfg.dataDir); } catch { /* ignore */ } }
+    if (behavior) { try { behavior.setDataDir(cfg.dataDir); } catch { /* ignore */ } }
+  if (legacyPrefs) { try { legacyPrefs.setDataDir(cfg.dataDir); } catch { /* ignore */ } }
   if (legacyUsb) {
     try {
       legacyUsb.startAuto(() => visionConfig, {
@@ -370,9 +368,7 @@ export function apply(ctx, config = {}) {
         '/care on|off  个人主动关心（主人）',
         '/offline / /online  全局下线/上线（主人）',
         '/remind  提醒列表/取消（主人）',
-        '/selfedit on|off|status|<提案>  代码自改（主人）',
-        '/approve edit <id> / /deny edit <id>  审批自改（主人）',
-        '/behavior [set key value|reset]  行为参数（主人）',
+            '/behavior [set key value|reset]  行为参数（主人）',
         '/pref add|list|del ...  全局规矩（主人）',
         '/persona [show|<人设>]  查看/替换人设（主人）',
         '/facts [搜|详情|删|恢复]  长期记忆',
@@ -563,34 +559,6 @@ export function apply(ctx, config = {}) {
       }).join('\n'));
     }
 
-    if (cmd === 'selfedit') {
-      if (!isMaster) return taskReply(chatId, chatType, '这个只有主人能改。');
-      if (!legacySelfedit) return taskReply(chatId, chatType, '代码自改不可用。');
-      const a = String(arg || '').trim();
-      if (!a || a === 'status' || a === '状态') return taskReply(chatId, chatType, '代码自改：' + (legacySelfedit.isEnabled() ? '开' : '关'));
-      if (a === 'on' || a === '开') { legacySelfedit.setEnabled(true); return taskReply(chatId, chatType, '代码自改已开启（提案仍需 /approve edit <id> 才应用）。'); }
-      if (a === 'off' || a === '关') { legacySelfedit.setEnabled(false); return taskReply(chatId, chatType, '代码自改已关闭。'); }
-      try {
-        const r = legacySelfedit.create({ request: a });
-        return taskReply(chatId, chatType, String((r && r.msg) || (r && r.ok ? '提案已生成。' : '提案失败。')));
-      } catch (e) {
-        return taskReply(chatId, chatType, '提案失败：' + String(e && e.message));
-      }
-    }
-
-    if (cmd === 'approve' || cmd === 'deny') {
-      if (!isMaster) return taskReply(chatId, chatType, '这个只有主人能做。');
-      if (!legacySelfedit) return taskReply(chatId, chatType, '代码自改不可用。');
-      const m2 = String(arg || '').match(/^edit\s+(\S+)$/i);
-      if (!m2) return taskReply(chatId, chatType, '用法：/' + cmd + ' edit <id>');
-      try {
-        const r = cmd === 'approve' ? legacySelfedit.approve(m2[1]) : legacySelfedit.deny(m2[1]);
-        return taskReply(chatId, chatType, String((r && r.msg) || (r && r.ok ? '已处理。' : '处理失败。')));
-      } catch (e) {
-        return taskReply(chatId, chatType, '处理失败：' + String(e && e.message));
-      }
-    }
-
     if (cmd === 'persona') {
       if (!isMaster) return taskReply(chatId, chatType, '这个只有主人能改。');
       const a = String(arg || '').trim();
@@ -639,26 +607,26 @@ export function apply(ctx, config = {}) {
 
     if (cmd === 'pref') {
       if (!isMaster) return taskReply(chatId, chatType, '这个只有主人能改。');
-      if (!prefsStore) return taskReply(chatId, chatType, '偏好不可用。');
+      if (!legacyPrefs) return taskReply(chatId, chatType, '偏好不可用。');
       const sub = String(arg || '').trim().match(/^(add|list|del|rm)\s*([\s\S]*)$/i);
       const action = sub ? sub[1].toLowerCase() : (arg ? 'add' : 'list');
       const rest = sub ? sub[2].trim() : String(arg || '').trim();
       if (action === 'list') {
-        const list = prefsStore.all();
+        const list = legacyPrefs.all();
         if (!list.length) return taskReply(chatId, chatType, '还没有规矩。用法：/pref add 说话不超过两句');
         return taskReply(chatId, chatType, '现在生效的规矩（全局）：\n' + list.map((x, i) => (i + 1) + '. ' + x.text).join('\n'));
       }
       if (action === 'add') {
         if (!rest) return taskReply(chatId, chatType, '用法：/pref add 说话不超过两句');
         try {
-          await prefsStore.add(rest, { source: 'command' });
+          await legacyPrefs.add(rest, { source: 'command' });
           if (visionConfig) visionConfig.__prefsDirty = true;
           return taskReply(chatId, chatType, '记住这条规矩了：' + rest);
         } catch (e) {
           return taskReply(chatId, chatType, '加规矩失败：' + String(e && e.message));
         }
       }
-      const gone = prefsStore.removeByIndex(rest);
+      const gone = legacyPrefs.removeByIndex(rest);
       return taskReply(chatId, chatType, gone ? '删了规矩：' + gone.text : '没找到这条规矩。');
     }
 
