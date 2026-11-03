@@ -69,30 +69,30 @@ memory-server :8791
 
 ### P0
 
-1. target/token 已支持 `data/runtime.json`，profile 留空；当前 GUI 进程尚未重启验证新 profile。
-2. `legacyEnabled` 已默认 false，但 `server.js`/旧 scripts 仍在仓库；部署脚本还能启动 8787。
+1. target/token 已支持 `data/runtime.json`，profile 留空；GUI 已重启并加载 web profile，但 target 行为探针尚未得到可判定结果。
+2. `legacyEnabled` 已默认 false，但根目录 `server.js`/`src/bot.js` 和旧 tests 仍在仓库；旧 web/scripts 已移入 legacy。
 3. 备份已补 episodes/digest/narrative，但真实恢复演练仍是手动的。
 4. `isMaster` 已改为真实 sender；仍需端到端非主人权限回归。
 
 ### P1
 
-5. GUI target 已接入 `whale-system-context`（profile 配置完成，需 GUI 重启验证）；其它 GUI 会话仍按设计不注入。
+5. GUI target 已接入 `whale-system-context`；profile 已加载，target 工具记录存在，但行为级 system-context 验收未完成；其它 GUI 会话仍按设计不注入。
 6. `care` 与 `proactive.care` 两套配置并存。
 7. 普通 headless 与 task profile 两份配置需要手工同步。
 8. `server.js` / `src/bot.js` / `legacy/web/` / `legacy/scripts/` 属于 legacy，主路径不依赖。
 
 ### P2
 
-9. `whale-fixed-session` / `whale-gui-input` 代码仍在仓库，未安装；有误装风险。
-10. 大量绝对路径和 Windows 假设。
-11. 旧 `tests/` 60 个测试未纳入新 CI；新栈测试独立。
-12. 无 git 仓库/CI 基线（正在补）。
+9. `whale-fixed-session` / `whale-gui-input` 已移到 `legacy/plugins`，未安装；仍可能被手工误装。
+10. 仍有 Windows 假设；核心启动脚本已相对化，旧维护脚本还有绝对路径。
+11. 旧 `tests/` 62 个测试未纳入新 CI；新栈测试独立 72 项。
+12. 已有本地 git commit 和 CI 基线；尚未配置 remote/push。
 
 ## 7. 继续方向
 
-1. 配置集中：target/token/路径进入 runtime state，不再散落 profile。
-2. 删除/隔离 legacy：server.js、bot.js、old web、old deploy scripts。
-3. GUI target 的 system-context 需重启 GUI 后验收。
+1. 配置集中：target/token/路径进入 runtime state，不再散落 profile（已完成核心链路）。
+2. 删除/隔离 legacy：server.js、bot.js、old tests。
+3. GUI target 的 system-context 需要行为级验收。
 4. 统一 care 配置。
 5. 完成真实验收：非主人、群话题、`/dl`、图片。
-6. GitHub：`.gitignore`、README、profiles 示例、CI、release 打包。
+6. GitHub：配置 remote、push、打 tag。
