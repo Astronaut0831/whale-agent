@@ -165,7 +165,8 @@ export function apply(ctx, config = {}) {
   const cfg = { ...DEFAULTS, ...(config || {}) };
   cfg.guiBroker = { ...DEFAULTS.guiBroker, ...((config && config.guiBroker) || {}) };
   const runtime = readRuntime({ runtimeFile: cfg.runtimeFile });
-  if (!cfg.guiBroker.sessionId && runtime.guiSessionId) cfg.guiBroker.sessionId = String(runtime.guiSessionId);
+  // Keep an empty profile target empty: resolve runtime per request so changing
+  // data/runtime.json takes effect without restarting the adapter.
   if (cfg.guiBroker.tokenFile === DEFAULTS.guiBroker.tokenFile && runtime.guiTokenFile) cfg.guiBroker.tokenFile = String(runtime.guiTokenFile);
   const whale = readWhaleConfig(cfg.whaleConfigPath);
   let visionConfig = whale;
