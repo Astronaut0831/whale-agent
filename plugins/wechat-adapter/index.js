@@ -18,6 +18,8 @@ import { createGuiBroker, extractTokenFromLog } from './lib/gui-broker.js';
 import { withLease } from './lib/session-lease.js';
 import { readRuntime, repoRoot } from '../lib/runtime.js';
 import { prefsBlock, selfnoteBlock } from '../lib/context-data.js';
+import * as behavior from '../lib/behavior.js';
+import * as prefsStore from '../lib/prefs-store.js';
 import { registerMemoryTools } from './lib/memory-tools.js';
 import { recentUserTexts } from './lib/recent-context.js';
 import { setOutboxFile, enqueue, take, ack, resetSending } from './lib/outbox.js';
@@ -36,8 +38,6 @@ let legacyLinks = null;
 let legacyCorpus = null;
 let legacyProactive = null;
 let legacySelfedit = null;
-let legacyBehavior = null;
-let legacyPrefs = null;
 let legacyUsb = null;
 let legacyStickers = null;
 try {
@@ -53,8 +53,6 @@ try {
   legacyCorpus = localRequire('../../src/corpus.js');
   legacyProactive = localRequire('../../src/proactive.js');
   legacySelfedit = localRequire('../../src/selfedit.js');
-  legacyBehavior = localRequire('../../src/behavior.js');
-  legacyPrefs = localRequire('../../src/prefs.js');
   legacyUsb = localRequire('../../src/usb.js');
 } catch { /* optional legacy features */ }
 
@@ -206,7 +204,7 @@ export function apply(ctx, config = {}) {
     history: groupHistory,
     stateFile: cfg.groupStateFile,
     judge: groupJudge,
-    behavior: legacyBehavior,
+    behavior: behavior,
   });
   const masterWxid = String(((whale.persona || {}).master || {}).wxids?.[0] || '');
   const token = String(((whale.gateway || {}).wechat || {}).inboundToken || '');
@@ -227,8 +225,8 @@ export function apply(ctx, config = {}) {
   if (legacyCorpus) { try { legacyCorpus.setDataDir(cfg.dataDir); } catch { /* ignore */ } }
   if (legacyProactive) { try { legacyProactive.setDataDir(cfg.dataDir); } catch { /* ignore */ } }
   if (legacySelfedit) { try { legacySelfedit.setDataDir(cfg.dataDir); } catch { /* ignore */ } }
-  if (legacyBehavior) { try { legacyBehavior.setDataDir(cfg.dataDir); } catch { /* ignore */ } }
-  if (legacyPrefs) { try { legacyPrefs.setDataDir(cfg.dataDir); } catch { /* ignore */ } }
+  if (behavior) { try { behavior.setDataDir(cfg.dataDir); } catch { /* ignore */ } }
+  if (prefsStore) { try { prefsStore.setDataDir(cfg.dataDir); } catch { /* ignore */ } }
   if (legacyUsb) {
     try {
       legacyUsb.startAuto(() => visionConfig, {
@@ -632,42 +630,42 @@ export function apply(ctx, config = {}) {
 
     if (cmd === 'behavior') {
       if (!isMaster) return taskReply(chatId, chatType, '这个只有主人能改。');
-      if (!legacyBehavior) return taskReply(chatId, chatType, '行为参数不可用。');
+      if (!behavior) return taskReply(chatId, chatType, '行为参数不可用。');
       const a = String(arg || '').trim();
       if (a === 'reset' || a === '重置') {
-        const all = legacyBehavior.reset();
+        const all = behavior.reset();
         return taskReply(chatId, chatType, '行为参数已恢复默认：' + Object.entries(all).map(([k, v]) => k + '=' + v).join('，'));
       }
       const sm = a.match(/^set\s+(\S+)\s+(-?\d+)$/i);
       if (sm) {
-        const r = legacyBehavior.set(sm[1], sm[2]);
+        const r = behavior.set(sm[1], sm[2]);
         return taskReply(chatId, chatType, r.ok ? '已设置 ' + r.key + ' = ' + r.value : '设置失败：' + r.msg);
       }
-      return taskReply(chatId, chatType, '当前行为参数：' + Object.entries(legacyBehavior.all()).map(([k, v]) => k + '=' + v).join('，') + '（改：/behavior set key value；恢复：/behavior reset）');
+      return taskReply(chatId, chatType, '当前行为参数：' + Object.entries(behavior.all()).map(([k, v]) => k + '=' + v).join('，') + '（改：/behavior set key value；恢复：/behavior reset）');
     }
 
     if (cmd === 'pref') {
       if (!isMaster) return taskReply(chatId, chatType, '这个只有主人能改。');
-      if (!legacyPrefs) return taskReply(chatId, chatType, '偏好不可用。');
+      if (!prefsStore) return taskReply(chatId, chatType, '偏好不可用。');
       const sub = String(arg || '').trim().match(/^(add|list|del|rm)\s*([\s\S]*)$/i);
       const action = sub ? sub[1].toLowerCase() : (arg ? 'add' : 'list');
       const rest = sub ? sub[2].trim() : String(arg || '').trim();
       if (action === 'list') {
-        const list = legacyPrefs.all();
+        const list = prefsStore.all();
         if (!list.length) return taskReply(chatId, chatType, '还没有规矩。用法：/pref add 说话不超过两句');
         return taskReply(chatId, chatType, '现在生效的规矩（全局）：\n' + list.map((x, i) => (i + 1) + '. ' + x.text).join('\n'));
       }
       if (action === 'add') {
         if (!rest) return taskReply(chatId, chatType, '用法：/pref add 说话不超过两句');
         try {
-          await legacyPrefs.add(rest, { source: 'command' });
+          await prefsStore.add(rest, { source: 'command' });
           if (visionConfig) visionConfig.__prefsDirty = true;
           return taskReply(chatId, chatType, '记住这条规矩了：' + rest);
         } catch (e) {
           return taskReply(chatId, chatType, '加规矩失败：' + String(e && e.message));
         }
       }
-      const gone = legacyPrefs.removeByIndex(rest);
+      const gone = prefsStore.removeByIndex(rest);
       return taskReply(chatId, chatType, gone ? '删了规矩：' + gone.text : '没找到这条规矩。');
     }
 
@@ -781,7 +779,7 @@ export function apply(ctx, config = {}) {
       if (key === 'mute') { conf.group = conf.group || {}; conf.group.silentMinutes = value; }
       writeWhaleConfig(conf);
       try {
-        if (key === 'bubbles' && legacyBehavior) legacyBehavior.set('maxBubbles', value);
+        if (key === 'bubbles' && behavior) behavior.set('maxBubbles', value);
         if (visionConfig) {
           let vn = visionConfig;
           for (let i = 0; i < parts.length - 1; i += 1) { vn[parts[i]] = vn[parts[i]] || {}; vn = vn[parts[i]]; }
@@ -1714,7 +1712,7 @@ export function apply(ctx, config = {}) {
             });
           },
           splitBubbles: (text) => splitBubbles(text, {
-            maxBubbles: legacyBehavior ? (legacyBehavior.get('maxBubbles') || 2) : undefined,
+            maxBubbles: behavior ? (behavior.get('maxBubbles') || 2) : undefined,
           }),
           sendBubbles,
           log,
