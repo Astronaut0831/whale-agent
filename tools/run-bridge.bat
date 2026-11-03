@@ -4,7 +4,8 @@ cd /d "%~dp0.."
 if not exist "data" mkdir "data"
 set "WHALE_BOT_URL=http://127.0.0.1:8788/webhook/wechat"
 set "PYTHON=%WHALE_PYTHON%"
-if not defined PYTHON (
+if not defined PYTHON set "PYTHON=%LOCALAPPDATA%\Programs\Python\Python312\python.exe"
+if not exist "%PYTHON%" (
   where py >nul 2>&1 && (set "PYTHON=py -3") || (set "PYTHON=python")
 )
 :loop
