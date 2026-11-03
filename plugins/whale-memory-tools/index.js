@@ -23,18 +23,31 @@ export function resolveIsMaster(config = {}, env = process.env) {
 }
 
 export function apply(ctx, config = {}) {
-  ctx.on('agent/created', ({ agent } = {}) => {
+  const registered = new Set();
+  const attach = (agent) => {
     if (!agent || !agent.ctx) return;
+    const sid = agent.session && agent.session.id;
+    if (!sid || registered.has(String(sid))) return;
     const effective = { ...config, targetSessionId: resolveTarget(config) };
     // 微信 headless：env scope 优先；GUI：只给目标 session 注册工具。
     const scope = resolveScope(agent, effective, process.env.WHALE_SESSION_SCOPE);
     if (!scope) return;
-    registerMemoryTools(agent.ctx, {
+    const ok = registerMemoryTools(agent.ctx, {
       memoryUrl: String(process.env.WHALE_MEMORY_URL || config.memoryUrl || 'http://127.0.0.1:8791'),
       token: resolveMemoryToken(config) || String(process.env.WHALE_MEMORY_TOKEN || ''),
       scope,
       isMaster: resolveIsMaster(config, process.env),
     });
+    if (ok) registered.add(String(sid));
+  };
+  ctx.on('agent/created', ({ agent } = {}) => attach(agent));
+  // Resumed target agents can predate this plugin; attach before their next turn.
+  ctx.on('session/event', (session, event) => {
+    if (!event || event.type !== 'turn/start' || !session) return;
+    const target = resolveTarget(config);
+    if (!target || String(session.id) !== target) return;
+    const agent = ctx.agents && typeof ctx.agents.get === 'function' ? ctx.agents.get(session.id) : null;
+    if (agent) attach(agent);
   });
 }
 

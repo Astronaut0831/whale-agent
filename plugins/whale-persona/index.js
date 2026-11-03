@@ -5,7 +5,7 @@ import path from 'node:path';
 import { resolveTarget, repoRoot } from '../lib/runtime.js';
 
 export const name = 'whale-persona';
-export const inject = ['systemPrompt'];
+export const inject = ['systemPrompt', 'agents'];
 
 export function readPersona(path) {
   try { return String(fs.readFileSync(path, 'utf8')).trim(); } catch { return ''; }
@@ -24,15 +24,24 @@ export function apply(ctx, config = {}) {
     return;
   }
 
+  const addFor = (agent) => {
+    if (!agent || !agent.ctx || !agent.ctx.systemPrompt) return;
+    const text = readPersona(file);
+    if (text) agent.ctx.systemPrompt.section({ name: 'whale-persona', order: 100, text });
+  };
   ctx.on('agent/created', ({ agent } = {}) => {
     const targetSessionId = resolveTarget(config);
     const sid = agent && agent.session && agent.session.id;
     if (!targetSessionId || !sid || String(sid) !== targetSessionId) return;
-    if (!agent.ctx || !agent.ctx.systemPrompt) return;
-    const text = readPersona(file);
-    if (text) {
-      agent.ctx.systemPrompt.section({ name: 'whale-persona', order: 100, text });
-    }
+    addFor(agent);
+  });
+  // Resumed target agents can predate this plugin; reattach on the next turn.
+  ctx.on('session/event', (session, event) => {
+    if (!event || event.type !== 'turn/start') return;
+    const targetSessionId = resolveTarget(config);
+    if (!targetSessionId || !session || String(session.id) !== targetSessionId) return;
+    const agent = ctx.agents && typeof ctx.agents.get === 'function' ? ctx.agents.get(session.id) : null;
+    if (agent) addFor(agent);
   });
 }
 

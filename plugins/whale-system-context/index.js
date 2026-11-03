@@ -46,11 +46,23 @@ export function apply(ctx, config = {}) {
     addSection(ctx.systemPrompt, buildContextText(config.env || process.env));
     return;
   }
+  const addFor = (agent) => {
+    addSection(agent && agent.ctx && agent.ctx.systemPrompt, legacyContextText(config.env || process.env));
+  };
   ctx.on('agent/created', ({ agent } = {}) => {
     const target = resolveTarget(config);
     const sid = agent && agent.session && agent.session.id;
     if (!target || !sid || String(sid) !== target) return;
-    addSection(agent.ctx && agent.ctx.systemPrompt, legacyContextText(config.env || process.env));
+    addFor(agent);
+  });
+  // A target can be resumed before the plugin was applied; add the section on
+  // the next turn as well. Same section name replaces the previous layer.
+  ctx.on('session/event', (session, event) => {
+    if (!event || event.type !== 'turn/start') return;
+    const target = resolveTarget(config);
+    if (!target || !session || String(session.id) !== target) return;
+    const agent = ctx.agents && typeof ctx.agents.get === 'function' ? ctx.agents.get(session.id) : null;
+    if (agent) addFor(agent);
   });
 }
 
