@@ -81,4 +81,4 @@ npm run package
 
 - GUI 输入仍未统一走 broker（P3）
 - 非主人私聊、群主动话题、真实 `/dl` 仍需真实账号验收
-- 旧 `server.js` / `legacy/web/` / old tests 仍是仓库中的 legacy，不应进入发布包
+- 旧 `legacy/`（server.js、src-bot.js、old tests/web/scripts）不应进入发布包

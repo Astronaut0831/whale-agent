@@ -8,8 +8,6 @@
         "start": "powershell -NoProfile -ExecutionPolicy Bypass -File tools/start-all.ps1",
         "doctor": "powershell -NoProfile -ExecutionPolicy Bypass -File tools/p4-healthcheck.ps1",
         "test": "node scripts/test-new.mjs",
-        "legacy:start": "set WHALE_LEGACY=1&& node server.js",
-        "legacy:test": "node --test tests",
         "package": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/package-source.ps1",
         "bump": "node scripts/bump-version.js"
     },
