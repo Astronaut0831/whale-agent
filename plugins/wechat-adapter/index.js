@@ -976,6 +976,7 @@ export function apply(ctx, config = {}) {
 
   const guiBrokerCache = new Map();
   const guiInputCache = new Map();
+  const guiInputJobs = new Map();
   const guiInputInflight = new Set();
   const GUI_INPUT_TTL_MS = 10 * 60 * 1000;
   const GUI_INPUT_MAX = 200;
@@ -1457,18 +1458,23 @@ export function apply(ctx, config = {}) {
         return sendJson(res, 409, { ok: false, error: 'target session mismatch' });
       }
       const targetSessionId = configuredTarget;
+      const asyncRequested = body.async === true || body.mode === 'async' || body.wait === false;
       const idempotencyKey = String(body.idempotencyKey || body.requestId || '').trim().slice(0, 128);
-      if (idempotencyKey) {
-        if (guiInputInflight.has(idempotencyKey)) {
-          return sendJson(res, 409, { ok: false, error: 'duplicate request in flight', idempotencyKey });
+      const requestKey = idempotencyKey || (asyncRequested
+        ? 'gui-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8)
+        : '');
+      if (requestKey) {
+        if (guiInputInflight.has(requestKey)) {
+          return sendJson(res, 409, { ok: false, error: 'duplicate request in flight', idempotencyKey: requestKey });
         }
-        const cached = guiInputCache.get(idempotencyKey);
+        const cached = guiInputCache.get(requestKey);
         if (cached && Date.now() - cached.at < GUI_INPUT_TTL_MS) {
           return sendJson(res, 200, { ...cached.value, duplicate: true });
         }
-        guiInputInflight.add(idempotencyKey);
+        guiInputInflight.add(requestKey);
       }
-      try {
+
+      const runOnce = async () => {
         const out = await handleGuiBroker({
           chat_id: 'gui',
           chat_type: 'private',
@@ -1477,29 +1483,76 @@ export function apply(ctx, config = {}) {
           text,
         }, { deliver: false });
         if (!out) throw new Error('broker route rejected');
-        const value = {
+        return {
           ok: true,
           text: out.text,
           targetSessionId,
-          idempotencyKey: idempotencyKey || undefined,
+          idempotencyKey: requestKey || undefined,
           traceId: out.traceId,
           turn: out.turn,
           seq: out.seq,
         };
-        if (idempotencyKey) {
-          guiInputCache.set(idempotencyKey, { at: Date.now(), value });
-          if (guiInputCache.size > GUI_INPUT_MAX) {
-            const oldest = guiInputCache.keys().next().value;
-            if (oldest !== undefined) guiInputCache.delete(oldest);
-          }
+      };
+      const remember = (key, value) => {
+        if (!key) return;
+        guiInputCache.set(key, { at: Date.now(), value });
+        if (guiInputCache.size > GUI_INPUT_MAX) {
+          const oldest = guiInputCache.keys().next().value;
+          if (oldest !== undefined) guiInputCache.delete(oldest);
         }
-        log({ kind: 'gui-input', targetSessionId, traceId: out.traceId, turn: out.turn, seq: out.seq, idempotencyKey: idempotencyKey || undefined });
+      };
+
+      if (asyncRequested) {
+        if (guiInputJobs.size > GUI_INPUT_MAX) {
+          const oldestJob = guiInputJobs.keys().next().value;
+          if (oldestJob !== undefined) guiInputJobs.delete(oldestJob);
+        }
+        guiInputJobs.set(requestKey, { at: Date.now(), status: 'queued', requestId: requestKey, targetSessionId });
+        Promise.resolve()
+          .then(async () => {
+            guiInputJobs.set(requestKey, { at: Date.now(), status: 'running', requestId: requestKey, targetSessionId });
+            const value = await runOnce();
+            remember(requestKey, value);
+            guiInputJobs.set(requestKey, { at: Date.now(), status: 'done', requestId: requestKey, targetSessionId, value });
+            log({ kind: 'gui-input-async', requestId: requestKey, targetSessionId, traceId: value.traceId, turn: value.turn, seq: value.seq });
+          })
+          .catch((e) => {
+            guiInputJobs.set(requestKey, { at: Date.now(), status: 'error', requestId: requestKey, targetSessionId, error: String(e && e.message) });
+            log({ kind: 'gui-input-async-fail', requestId: requestKey, targetSessionId, error: String(e && e.message).slice(0, 200) });
+          })
+          .finally(() => guiInputInflight.delete(requestKey));
+        return sendJson(res, 202, { ok: true, accepted: true, requestId: requestKey, targetSessionId });
+      }
+
+      try {
+        const value = await runOnce();
+        remember(requestKey, value);
+        log({ kind: 'gui-input', targetSessionId, traceId: value.traceId, turn: value.turn, seq: value.seq, idempotencyKey: requestKey || undefined });
         return sendJson(res, 200, value);
       } catch (e) {
-        return sendJson(res, 503, { ok: false, error: String(e && e.message), idempotencyKey: idempotencyKey || undefined });
+        return sendJson(res, 503, { ok: false, error: String(e && e.message), idempotencyKey: requestKey || undefined });
       } finally {
-        if (idempotencyKey) guiInputInflight.delete(idempotencyKey);
+        if (requestKey) guiInputInflight.delete(requestKey);
       }
+    }
+
+    if (url.pathname === '/api/gui/input/status') {
+      const remote = String(req.socket.remoteAddress || '');
+      const loopback = remote === '127.0.0.1' || remote === '::1' || remote === '::ffff:127.0.0.1';
+      if (!loopback) return sendJson(res, 403, { ok: false, error: 'loopback only' });
+      if (!checkToken({ headers: req.headers, url: req.url }, token)) {
+        return sendJson(res, 401, { ok: false, error: 'bad token' });
+      }
+      if (req.method !== 'GET') return sendJson(res, 405, { ok: false, error: 'GET only' });
+      const key = String(url.searchParams.get('requestId') || url.searchParams.get('idempotencyKey') || '').trim();
+      if (!key) return sendJson(res, 400, { ok: false, error: 'requestId required' });
+      const job = guiInputJobs.get(key);
+      const cached = guiInputCache.get(key);
+      if (!job && cached && Date.now() - cached.at < GUI_INPUT_TTL_MS) {
+        return sendJson(res, 200, { ok: true, requestId: key, status: 'done', value: cached.value });
+      }
+      if (!job) return sendJson(res, 404, { ok: false, error: 'request not found', requestId: key });
+      return sendJson(res, 200, { ok: true, ...job });
     }
 
     if (req.method === 'GET' && url.pathname === '/api/online') {
