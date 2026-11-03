@@ -34,6 +34,19 @@ $runtimeTarget = ''
 try { $runtimeTarget = [string]((Get-Content -LiteralPath $runtimePath -Raw -Encoding UTF8 | ConvertFrom-Json).guiSessionId) } catch { $runtimeTarget = '' }
 Add-Check 'runtime-target' ([bool]$runtimeTarget) $(if ($runtimeTarget) { 'guiSessionId present' } else { 'missing data/runtime.json target' })
 
+$sessionRoot = Join-Path $env:USERPROFILE '.dsh\sessions\--D-dsh-workspace-chat--'
+$activeSession = ''
+try {
+  $activeSession = Get-ChildItem -LiteralPath $sessionRoot -Directory -ErrorAction SilentlyContinue |
+    ForEach-Object {
+      $f = Join-Path $_.FullName 'session.v4.jsonl.zstd'
+      if (Test-Path -LiteralPath $f) { [pscustomobject]@{ Name = $_.Name; Mtime = (Get-Item -LiteralPath $f).LastWriteTime } }
+    } |
+    Sort-Object Mtime -Descending |
+    Select-Object -First 1 -ExpandProperty Name
+} catch { $activeSession = '' }
+Add-Check 'runtime-target-active' ([bool]($runtimeTarget -and $activeSession -and $runtimeTarget -eq $activeSession)) "target=$runtimeTarget active=$activeSession"
+
 $headlessProfile = Join-Path $profilesRoot 'whale-headless\cordis.patch.yml'
 $taskProfile = Join-Path $profilesRoot 'whale-headless-task\cordis.patch.yml'
 $headlessText = Get-Content -LiteralPath $headlessProfile -Raw -Encoding UTF8
