@@ -14,7 +14,7 @@ export function runtimeFile(config = {}) {
 export function readRuntime(config = {}) {
   try {
     const file = runtimeFile(config);
-    return JSON.parse(fs.readFileSync(file, 'utf8')) || {};
+    return JSON.parse(fs.readFileSync(file, 'utf8').replace(/^\uFEFF/, '')) || {};
   } catch {
     return {};
   }

@@ -17,5 +17,5 @@ if ($MemoryToken) { $state.memoryToken = $MemoryToken }
 if ($GuiTokenFile) { $state.guiTokenFile = $GuiTokenFile }
 if ($Workspace) { $state.workspace = $Workspace }
 $state.updatedAt = [DateTimeOffset]::Now.ToUnixTimeMilliseconds()
-$state | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $file -Encoding UTF8
+[System.IO.File]::WriteAllText($file, ($state | ConvertTo-Json -Depth 5), (New-Object System.Text.UTF8Encoding($false)))
 Write-Output ('runtime state written: ' + $file)
