@@ -3,10 +3,8 @@
  * headless 用 env 传入；GUI 只给 targetSessionId 注入，不污染其它会话。
  */
 
-import { createRequire } from 'node:module';
 import { resolveTarget } from '../lib/runtime.js';
-
-const localRequire = createRequire(import.meta.url);
+import { prefsBlock, selfnoteBlock } from '../lib/context-data.js';
 
 export const name = 'whale-system-context';
 export const inject = ['systemPrompt', 'agents'];
@@ -24,12 +22,8 @@ export function buildContextText(env = process.env) {
 function legacyContextText(env) {
   let prefs = String(env.WHALE_PREFS_BLOCK || '').trim();
   let self = String(env.WHALE_SELFNOTE_BLOCK || '').trim();
-  if (!prefs) {
-    try { prefs = localRequire('../../src/prefs').renderAll({ max: 12 }) || ''; } catch { /* optional */ }
-  }
-  if (!self) {
-    try { self = localRequire('../../src/selfnote').block(5) || ''; } catch { /* optional */ }
-  }
+  if (!prefs) prefs = prefsBlock({ max: 12 });
+  if (!self) self = selfnoteBlock({ n: 5 });
   return buildContextText({ WHALE_PREFS_BLOCK: prefs, WHALE_SELFNOTE_BLOCK: self });
 }
 
