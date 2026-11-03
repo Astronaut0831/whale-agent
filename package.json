@@ -1,0 +1,34 @@
+{
+    "name": "whale-girl-bot",
+    "version": "4.0.0",
+    "private": false,
+    "description": "鲸鲸 —— DSH-native WeChat companion with long-term memory",
+    "type": "commonjs",
+    "scripts": {
+        "start": "powershell -NoProfile -ExecutionPolicy Bypass -File tools/start-all.ps1",
+        "doctor": "powershell -NoProfile -ExecutionPolicy Bypass -File tools/p4-healthcheck.ps1",
+        "test": "node scripts/test-new.mjs",
+        "legacy:start": "set WHALE_LEGACY=1&& node server.js",
+        "legacy:test": "node --test tests",
+        "package": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/package-source.ps1",
+        "bump": "node scripts/bump-version.js"
+    },
+    "engines": {
+        "node": ">=22"
+    },
+    "keywords": [
+        "deepseek",
+        "dsh",
+        "chatbot",
+        "wechat",
+        "wechat-bot",
+        "memory",
+        "llm"
+    ],
+    "license": "MIT",
+    "author": "",
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/Banan1cee/whale_gril"
+    }
+}

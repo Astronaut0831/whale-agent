@@ -1,0 +1,39 @@
+# 运行时数据：包含 API Key、聊天记录、人设、词库、日志、微信数据库快照，绝不入库
+data/
+data.old/
+config.json
+config.json.*
+wechatauto_logs/
+wechatauto_db/
+workspace/
+.archify/
+.env
+profiles/
+runtime/
+
+# 本地备份 / 临时产物
+*.bak
+*.bak-*
+*.log
+*.tmp
+*.zip
+dist/
+release/
+
+# 系统
+.DS_Store
+Thumbs.db
+
+# 依赖 / 缓存
+node_modules/
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# 微信安装包 / 本地工具（tools/ 是项目自己的热键脚本，要入库）
+vendor/
+scripts/node-path.local
+
+# 桥接 OCR 的临时截图
+wechatauto_ocr_tmp.png

@@ -1,0 +1,22 @@
+[
+  {
+    "old": "function subjectOf(text) {",
+    "new": "function nearDuplicate(a, b) {\n  if (!a || !b) return false;\n  const ab = keywordScore(a, b);\n  const ba = keywordScore(b, a);\n  if (ab >= 0.6 && ba >= 0.6) return true;\n  const na = normText(a);\n  const nb = normText(b);\n  if (!na || !nb) return false;\n  return (na.includes(nb) || nb.includes(na)) && Math.min(na.length, nb.length) / Math.max(na.length, nb.length) >= 0.5;\n}\n\nfunction bumpPenalty(data, item, delta) {\n  const sk = item._session || (item.origin && item.origin.session);\n  const sess = sk && data.sessions && data.sessions[sk];\n  const orig = sess && Array.isArray(sess.items) ? sess.items.find((i) => i.id === item.id) : null;\n  const cur = Math.max(0, Math.min(1, Number((orig || item).recallPenalty) || 0));\n  const next = Math.max(0, Math.min(1, cur + delta));\n  if (orig) orig.recallPenalty = next;\n  item.recallPenalty = next;\n  return next;\n}\n\nfunction subjectOf(text) {",
+    "max_del": 200
+  },
+  {
+    "old": "    const score = 0.5 * rel + 0.35 * importance + 0.15 * recency;\n    return { ...x, score, cos, kw, rel, recency, importance };",
+    "new": "    const penalty = Math.max(0, Math.min(1, Number(x.recallPenalty) || 0));\n    const score = 0.5 * rel + 0.35 * importance + 0.15 * recency - 0.15 * penalty;\n    return { ...x, score, cos, kw, rel, recency, importance, penalty };",
+    "max_del": 200
+  },
+  {
+    "old": "  const best = scored.length ? scored[0].score : 0;\n  const cutoff = Math.max(minScore, best * 0.78);\n  const hit = scored.filter((x) => x.score >= cutoff).slice(0, topK);\n  return hit;",
+    "new": "  const best = scored.length ? scored[0].score : 0;\n  const cutoff = Math.max(minScore, best * 0.78);\n  const hit = [];\n  let dirty = false;\n  for (const x of scored) {\n    if (x.score < cutoff || hit.length >= topK) break;\n    if (hit.some((p) => nearDuplicate(p.text, x.text))) {\n      bumpPenalty(data, x, 0.1);\n      dirty = true;\n      continue;\n    }\n    hit.push(x);\n    bumpPenalty(data, x, -0.05);\n    dirty = true;\n  }\n  if (dirty) save(data);\n  return hit;",
+    "max_del": 300
+  },
+  {
+    "old": "    const score = 0.5 * rel + 0.35 * importance + 0.15 * recency + sameCtx;\n    return { ...x, score };",
+    "new": "    const penalty = Math.max(0, Math.min(1, Number(x.recallPenalty) || 0));\n    const score = 0.5 * rel + 0.35 * importance + 0.15 * recency + sameCtx - 0.15 * penalty;\n    return { ...x, score, penalty };",
+    "max_del": 200
+  }
+]
