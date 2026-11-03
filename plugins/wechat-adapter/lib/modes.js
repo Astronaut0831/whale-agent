@@ -44,7 +44,10 @@ export async function dispatchInbound(payload, deps = {}) {
   }
 
   if (mode === 'off' || mode === 'legacy') {
-    if (deps.legacyEnabled === false) return { mode, status: 200, data: { ok: true, ignored: true }, ok: true };
+    if (deps.legacyEnabled === false) {
+      deps.log?.({ kind: 'legacy-disabled', msgId: msg.msgId, sessionKey: msg.sessionKey, chatType: msg.chatType });
+      return { mode, status: 200, data: { ok: true, ignored: true }, ok: true };
+    }
     const r = await proxyLegacy(payload, deps);
     return { mode, status: r.status, data: r.data, ok: r.ok };
   }

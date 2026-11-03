@@ -25,6 +25,12 @@ test('主人私聊 active 接管', () => {
   assert.equal(decideMode({ mode: 'off', masterWxid: 'wxid_master' }, m), 'off');
 });
 
+test('非主人私聊也进入 active，由 headless 处理', () => {
+  const m = normalizeInbound({ chat_id: 'wxid_other', chat_type: 'private', msg_id: 'm4', text: 'hi' });
+  assert.equal(decideMode({ mode: 'active', masterWxid: 'wxid_master' }, m), 'active');
+  assert.equal(decideMode({ mode: 'active', masterWxid: 'wxid_master' }, { ...m, chatType: 'group' }), 'legacy');
+});
+
 test('缺 msg_id 报错', () => {
   assert.throws(() => normalizeInbound({ chat_id: 'x', chat_type: 'private', text: 'hi' }), /msg_id/);
 });

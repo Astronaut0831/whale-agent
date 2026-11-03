@@ -56,14 +56,14 @@ export function normalizeInbound(payload = {}) {
 /**
  * 路由判定：
  * - off：全部代理旧 bot；
- * - shadow/active：只有主人私聊接管，其余 legacy；
+ * - shadow/active：所有私聊进入 DSH（主人由 GUI broker 分支接管，非主人走 headless）；
+ * - group：由 modes 的 group 分支单独处理；
  * - 其他：legacy。
  */
-export function decideMode({ mode = 'off', masterWxid = '' } = {}, msg) {
+export function decideMode({ mode = 'off' } = {}, msg) {
   const m = String(mode || 'off');
   if (m === 'off') return 'off';
   if (m !== 'shadow' && m !== 'active') return 'legacy';
   if (!msg || msg.chatType !== 'private') return 'legacy';
-  if (String(msg.chatId) !== String(masterWxid)) return 'legacy';
   return m;
 }
