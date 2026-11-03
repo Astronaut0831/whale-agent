@@ -77,7 +77,7 @@ memory-server :8791
 ### P1
 
 5. GUI target 已接入 `whale-system-context`；profile 已加载，target 工具记录存在，但行为级 system-context 验收未完成；其它 GUI 会话仍按设计不注入。
-6. `care` 与 `proactive.care` 两套配置并存。
+6. `care` 是实际读者；`proactive.care` 无读者，已从 config.example 删除，运行中的 config.json 仍可手工清理。
 7. 普通 headless 与 task profile 两份配置需要手工同步。
 8. `legacy/` 集中存放 server.js、src-bot.js、旧 tests/web/scripts/plugins；主路径不依赖。
 

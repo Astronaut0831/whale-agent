@@ -269,14 +269,6 @@
     "_说明": "观测日志超过多少 MB 轮转成 xxx.1（只留一份历史）"
   },
   "proactive": {
-    "care": {
-      "enabled": true,
-      "minHoursSinceLast": 4,
-      "minGapHours": 0,
-      "maxPerDay": 0,
-      "startHour": 0,
-      "endHour": 24
-    },
     "group": {
       "enabled": true,
       "minSilenceMinutes": 30,
