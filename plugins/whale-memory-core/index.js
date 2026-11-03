@@ -69,6 +69,10 @@ export function apply(ctx, config = {}) {
     const turn = event.data && event.data.turn;
     const key = String(session.id || scope) + ':' + String(turn || event.seq || '');
     if (seen.has(key)) return;
+    if (seen.size >= 5000) {
+      const oldest = seen.values().next().value;
+      if (oldest !== undefined) seen.delete(oldest);
+    }
     seen.add(key);
 
     let messages;

@@ -2,7 +2,7 @@
 
 const textRender = (_args, value) => [{ type: 'text', text: JSON.stringify(value) }];
 
-export function registerMemoryTools(agentCtx, { memoryUrl, token = '', scope, isMaster = false, fetchImpl = fetch } = {}) {
+export function registerMemoryTools(agentCtx, { memoryUrl, token = '', scope, isMaster = false, fetchImpl = fetch, timeoutMs = 10000 } = {}) {
   if (!agentCtx || !agentCtx.tools || !memoryUrl || !scope) return false;
 
   const call = async (path, body) => {
@@ -10,6 +10,7 @@ export function registerMemoryTools(agentCtx, { memoryUrl, token = '', scope, is
       method: 'POST',
       headers: { 'content-type': 'application/json', ...(token ? { 'x-bot-token': token } : {}) },
       body: JSON.stringify({ scope, isMaster, ...body }),
+      signal: AbortSignal.timeout(Math.max(1000, Number(timeoutMs) || 10000)),
     });
     const data = await r.json();
     if (!r.ok) throw new Error(data && data.error ? data.error : 'memory HTTP ' + r.status);
