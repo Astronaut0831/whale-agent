@@ -783,8 +783,8 @@ def read_config():
 
 def build_bot_url(cfg):
     # 端口优先级：环境变量 > 服务写下的实际端口 > config.server.port
-    # （服务用 --port= 启动时 config 里还是老端口，读文件才不会连错）
-    port = (cfg.get("server") or {}).get("port", 8787)
+    # 新栈 adapter 默认 8788；8787 是已退役的旧 server。
+    port = (cfg.get("server") or {}).get("port", 8788)
     try:
         with open(os.path.join(ROOT, "data", "server-port.txt"), "r", encoding="utf-8") as _pf:
             _p = int((_pf.read() or "").strip())
