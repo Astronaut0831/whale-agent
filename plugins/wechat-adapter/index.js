@@ -1157,11 +1157,11 @@ let lastMasterInboundAt = 0;
       : '[私聊 ' + (sender || chatId) + ']';
     const _who = String(payload.sender_name || payload.senderName || (chatType === 'group' ? '群友' : sender) || '对方');
     let promptText = _src + ' ' + _hms + ' ' + _who + '：' + text;
-    if (chatType === 'group' && sessionWasCreated) {
+    if (chatType === 'group') {
       try {
-        const hist = groupHistory.load(chatId, 20) || [];
-        const lines = hist.filter((m) => m.role === 'user' && m.text).slice(-10)
-          .map((m) => String(m.name || '群友') + '：' + String(m.text).replace(/\s+/g, ' ').slice(0, 160));
+        const hist = groupHistory.load(chatId, 30) || [];
+        const lines = hist.filter((m) => m.text).slice(-20)
+          .map((m) => (m.role === 'assistant' ? '鲸鲸' : (m.name || '群友')) + '：' + String(m.text).replace(/\s+/g, ' ').slice(0, 240));
         if (lines.length) promptText = '【最近群聊】\n' + lines.join('\n') + '\n\n' + promptText;
       } catch { /* history is best effort */ }
     }
