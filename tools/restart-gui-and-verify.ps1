@@ -1,7 +1,7 @@
 $ErrorActionPreference = 'SilentlyContinue'
 $root = 'D:\dsh-workspace\chat'
 $log = 'D:\dsh-workspace\chat\whale_gril\data\gui-input-verify.log'
-$guiLog = 'D:\dsh-workspace\chat\whale_gril\data\gui-3080.log'
+$guiLog = Join-Path $env:LOCALAPPDATA 'dsh\web.log'
 $cfgPath = 'D:\dsh-workspace\chat\whale_gril\config.json'
 
 "[{0}] restart-and-verify start" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss') | Out-File -FilePath $log -Encoding UTF8

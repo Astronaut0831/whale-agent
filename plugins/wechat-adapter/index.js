@@ -1031,8 +1031,24 @@ let lastMasterInboundAt = 0;
     }
 
     let token = String(g.token || '');
-    if (!token && g.tokenFile) {
-      try { token = extractTokenFromLog(fs.readFileSync(g.tokenFile, 'utf8')); } catch { /* ignore */ }
+    if (!token) {
+      // GUI can be restarted by different launchers: the scheduled task writes
+      // %LOCALAPPDATA%\dsh\web.log, while older scripts wrote data/gui-3080.log.
+      // Read every known log and use the newest one, not a single hard-coded path.
+      const candidates = [
+        g.tokenFile,
+        path.join(repoRoot, 'data', 'gui-3080.log'),
+        process.env.LOCALAPPDATA && path.join(process.env.LOCALAPPDATA, 'dsh', 'web.log'),
+      ].filter(Boolean);
+      let bestAt = 0;
+      for (const file of new Set(candidates)) {
+        try {
+          const st = fs.statSync(file);
+          if (st.mtimeMs < bestAt) continue;
+          const found = extractTokenFromLog(fs.readFileSync(file, 'utf8'));
+          if (found) { token = found; bestAt = st.mtimeMs; }
+        } catch { /* missing log is fine */ }
+      }
     }
     if (!token) throw new Error('gui broker token missing');
     // 群聊按 chatId 分到独立 session；别人的私聊也各开一个，只有主人的私聊沿用当前会话。
