@@ -211,10 +211,11 @@ export function apply(ctx, config = {}) {
     // traffic: failing open would send every group message through the full agent.
     if (!careLlm || careLlm.isMock) return { reply: false, reason: 'judge_unavailable' };
     try {
-      const hist = groupHistory.load(chatId, 200) || [];
-      const transcript = hist
+      const hist = groupHistory.load(chatId, 120) || [];
+      let transcript = hist
         .map((m) => (m.role === 'assistant' ? '鲸鲸' : (m.name || '群友')) + '：' + String(m.text || '').replace(/\s+/g, ' ').slice(0, 300))
         .join('\n') || (senderName || '群友') + '：' + String(text || '').slice(0, 300);
+      if (transcript.length > 24000) transcript = transcript.slice(-24000);
       const system = '你是群聊里的鲸鲸的接话判断器。根据完整群聊上下文判断：鲸鲸现在该不该接这句话。'
         + '被点名、被引用、有人直接问她、向她求助或情绪明显需要回应 → REPLY。'
         + '普通群聊、别人互聊、刷屏、无意义重复、她插不上话 → SKIP。'
@@ -222,7 +223,7 @@ export function apply(ctx, config = {}) {
       const out = await careLlm.complete({
         system,
         turns: [{ role: 'user', content: '【群聊上下文】\n' + transcript + '\n\n【最新一句】\n' + (senderName || '群友') + '：' + String(text || '').slice(0, 1000) }],
-        maxTokens: 8,
+        maxTokens: 256,
         skipGovernor: true,
       });
       const raw = String(out || '').trim().toUpperCase();
