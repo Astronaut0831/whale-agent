@@ -95,6 +95,7 @@ export function createGroupPolicy({ config = {}, history, stateFile, now = Date.
     history.observe({
       chatId: msg.chatId, role: 'user', text: msg.text, name: msg.senderName,
       uid: msg.senderId, msgId: msg.msgId, ts: msg.ts,
+      imagePath: msg.imagePath, mime: msg.mime,
     });
   };
   const observeReply = (msg, text) => {

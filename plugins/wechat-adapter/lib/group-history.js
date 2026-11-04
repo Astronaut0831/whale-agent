@@ -27,8 +27,12 @@ export function createGroupHistory(file, { limit = 40 } = {}) {
         .slice(-n);
     } catch { return []; }
   };
-  const observe = ({ chatId, role, text, name = '', uid = '', msgId = '', ts = Date.now() }) => {
-    append({ chatId: String(chatId), role, text: String(text || ''), name: String(name || ''), uid: String(uid || ''), msgId: String(msgId || ''), ts: Number(ts) || Date.now() });
+  const observe = ({ chatId, role, text, name = '', uid = '', msgId = '', ts = Date.now(), imagePath = '', mime = '' }) => {
+    append({
+      chatId: String(chatId), role, text: String(text || ''), name: String(name || ''), uid: String(uid || ''),
+      msgId: String(msgId || ''), ts: Number(ts) || Date.now(),
+      imagePath: String(imagePath || ''), mime: String(mime || ''),
+    });
   };
   return { append, load, observe };
 }

@@ -205,7 +205,7 @@ export function apply(ctx, config = {}) {
 
   // Cheap first-stage gate: full recent group context, tiny output. The full
   // GUI agent is only invoked when this decides the message is worth answering.
-  async function judgeGroupReply({ chatId, text, senderName, atMe, replyToBot }) {
+  async function judgeGroupReply({ chatId, text, senderName, atMe, replyToBot, images = [] }) {
     const t = String(text || '');
     const addressedText = /[@＠]\s*(哦鲸鲸|鲸鲸)/.test(t) || /(哦鲸鲸|鲸鲸).*(在吗|在不在|出来|回我)/.test(t);
     if (atMe || replyToBot || addressedText) return { reply: true, reason: 'addressed' };
@@ -224,10 +224,17 @@ export function apply(ctx, config = {}) {
       + '被点名、被引用、有人直接问她、向她求助或情绪明显需要回应 → REPLY。'
       + '普通群聊、别人互聊、刷屏、无意义重复、她插不上话 → SKIP。'
       + '只输出 REPLY 或 SKIP，不要解释，不要加标点。';
-    const tryOnce = async (limit, cap) => {
+    const tryOnce = async (limit, cap, useImage = true) => {
+      const userText = '【群聊上下文】\n' + build(limit, cap) + '\n\n【最新一句】\n' + (senderName || '群友') + '：' + String(text || '').slice(0, 1000);
+      const content = (useImage && images.length)
+        ? [
+          { type: 'text', text: userText },
+          { type: 'image_url', image_url: { url: 'data:' + String(images[0].mediaType || 'image/jpeg') + ';base64,' + String(images[0].data || '') } },
+        ]
+        : userText;
       const out = await careLlm.complete({
         system,
-        turns: [{ role: 'user', content: '【群聊上下文】\n' + build(limit, cap) + '\n\n【最新一句】\n' + (senderName || '群友') + '：' + String(text || '').slice(0, 1000) }],
+        turns: [{ role: 'user', content }],
         maxTokens: 256,
         skipGovernor: true,
       });
@@ -235,12 +242,12 @@ export function apply(ctx, config = {}) {
       return { reply: raw.includes('REPLY'), raw: raw.slice(0, 20) };
     };
     try {
-      const first = await tryOnce(60, 16000);
-      log({ kind: 'group-judge', chatId, reply: first.reply, raw: first.raw });
+      const first = await tryOnce(60, 16000, true);
+      log({ kind: 'group-judge', chatId, reply: first.reply, raw: first.raw, image: Boolean(images.length) });
       return first.reply ? { reply: true, reason: 'judge_reply' } : { reply: false, reason: 'judge_skip' };
     } catch (firstError) {
       try {
-        const second = await tryOnce(20, 6000);
+        const second = await tryOnce(20, 6000, false);
         log({ kind: 'group-judge-retry', chatId, reply: second.reply, raw: second.raw });
         return second.reply ? { reply: true, reason: 'judge_reply' } : { reply: false, reason: 'judge_skip' };
       } catch (e) {
@@ -1077,6 +1084,20 @@ let lastMasterInboundAt = 0;
       name: 'wechat-image',
     }] : [];
     const chatId = String(payload.chat_id || payload.chatId || '');
+    const msgId = String(payload.msg_id || payload.msgId || '');
+    let currentImagePath = '';
+    if (rawImage && chatType === 'group' && chatId) {
+      try {
+        const mime = String(payload.mime || 'image/jpeg').split(';')[0];
+        const ext = mime.includes('png') ? 'png' : (mime.includes('gif') ? 'gif' : 'jpg');
+        const safeChat = chatId.replace(/[^A-Za-z0-9._@-]/g, '_');
+        const hash = crypto.createHash('sha1').update(rawImage).digest('hex').slice(0, 16);
+        const dir = path.join(cfg.dataDir, 'group-images', safeChat);
+        fs.mkdirSync(dir, { recursive: true });
+        currentImagePath = path.join(dir, hash + '.' + ext);
+        if (!fs.existsSync(currentImagePath)) fs.writeFileSync(currentImagePath, Buffer.from(rawImage, 'base64'));
+      } catch { currentImagePath = ''; }
+    }
     const runtimeTarget = g.sessionId ? '' : String(readRuntime({ runtimeFile: cfg.runtimeFile }).guiSessionId || '');
     const targetSessionId = String(payload.targetSessionId || payload.sessionId || g.sessionId || runtimeTarget || '');
     if (!targetSessionId || !g.url) throw new Error('gui broker config incomplete');
@@ -1088,6 +1109,9 @@ let lastMasterInboundAt = 0;
       const msgLike = {
         chatId, chatType: 'group', text, senderId: sender,
         senderName: String(payload.sender_name || payload.senderName || '群友'),
+        msgId,
+        imagePath: currentImagePath,
+        mime: currentImagePath ? String(payload.mime || 'image/jpeg').split(';')[0] : '',
         atMe: Boolean(payload.at_me ?? payload.atMe),
         replyToBot: Boolean(payload.reply_to_bot ?? payload.replyToBot),
         ts: Number(payload.timestamp || payload.ts) || Date.now(),
@@ -1101,6 +1125,7 @@ let lastMasterInboundAt = 0;
         senderName: msgLike.senderName,
         atMe: msgLike.atMe,
         replyToBot: msgLike.replyToBot,
+        images,
       });
       if (gate && !gate.reply) {
         await observeGroupSkip({ chatId, senderName: msgLike.senderName, text });
@@ -1165,7 +1190,29 @@ let lastMasterInboundAt = 0;
         if (lines.length) promptText = '【最近群聊】\n' + lines.join('\n') + '\n\n' + promptText;
       } catch { /* history is best effort */ }
     }
-    const out = await withLease('gui-broker:' + effectiveSession, () => broker.prompt(promptText, images), {
+    const promptImages = images.slice();
+    if (chatType === 'group') {
+      try {
+        const hist = groupHistory.load(chatId, 30) || [];
+        const seen = new Set(promptImages.map((im) => im.name));
+        for (const m of hist.slice(-8).reverse()) {
+          if (promptImages.length >= 4) break;
+          if (!m.imagePath || m.imagePath === currentImagePath || seen.has(m.imagePath)) continue;
+          if (!fs.existsSync(m.imagePath)) continue;
+          try {
+            const data = fs.readFileSync(m.imagePath).toString('base64');
+            promptImages.push({
+              type: 'image',
+              mediaType: String(m.mime || 'image/jpeg'),
+              data,
+              name: m.imagePath,
+            });
+            seen.add(m.imagePath);
+          } catch { /* skip unreadable image */ }
+        }
+      } catch { /* image context is best effort */ }
+    }
+    const out = await withLease('gui-broker:' + effectiveSession, () => broker.prompt(promptText, promptImages), {
       dir: cfg.dataDir,
       owner: 'adapter-' + process.pid,
       ttlMs: Number(g.leaseTtlMs) || 120000,
