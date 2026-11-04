@@ -155,9 +155,9 @@ export function apply(ctx, config = {}) {
   const cfg = { ...DEFAULTS, ...(config || {}) };
   cfg.guiBroker = { ...DEFAULTS.guiBroker, ...((config && config.guiBroker) || {}) };
   const runtime = readRuntime({ runtimeFile: cfg.runtimeFile });
-  // Keep an empty profile target empty: resolve runtime per request so changing
-  // data/runtime.json takes effect without restarting the adapter.
-  if (cfg.guiBroker.tokenFile === DEFAULTS.guiBroker.tokenFile && runtime.guiTokenFile) cfg.guiBroker.tokenFile = String(runtime.guiTokenFile);
+  // Runtime state is authoritative for the live GUI token file; a stale profile
+  // tokenFile must not shadow the token written by the current `dsh web` process.
+  if (runtime.guiTokenFile) cfg.guiBroker.tokenFile = String(runtime.guiTokenFile);
   const whale = readWhaleConfig(cfg.whaleConfigPath);
   let visionConfig = whale;
   try {
@@ -342,6 +342,8 @@ export function apply(ctx, config = {}) {
       && visionConfig.proactive.group.enabled !== false
   );
   let careDecision = { at: 0, due: false, reason: '' };
+// 主人最近一次开口的时间：判断「冷场多久」要用它，不然模型不知道你是不是刚聊完。
+let lastMasterInboundAt = 0;
 
   async function handleMiscCommand(payload) {
     const text = String(payload.text || payload.content || '').trim();
@@ -940,6 +942,35 @@ export function apply(ctx, config = {}) {
   const guiInputInflight = new Set();
   const GUI_INPUT_TTL_MS = 10 * 60 * 1000;
   const GUI_INPUT_MAX = 200;
+
+  // 群 → 独立 session 的映射（第一次见到这个群就建一个，之后一直用它）
+  const chatSessionsFile = String(cfg.chatSessionsFile || 'D:/dsh-workspace/chat/whale_gril/data/chat-sessions.json');
+  async function ensureChatSession(token, g, chatId, fallback) {
+    const key = String(chatId || '');
+    if (!key) return fallback;
+    let store = { byChat: {} };
+    try {
+      const raw = JSON.parse(fs.readFileSync(chatSessionsFile, 'utf8')) || {};
+      store = raw && raw.byChat && typeof raw.byChat === 'object' ? { byChat: raw.byChat } : { byChat: raw && typeof raw === 'object' ? raw : {} };
+    } catch { store = { byChat: {} }; }
+    const byChat = store.byChat || {};
+    if (byChat[key]) return String(byChat[key]);
+    try {
+      const boot = getGuiBroker(token, { ...g, sessionId: fallback || String(g.sessionId || '') || 'bootstrap' });
+      const out = await boot.call('session/create', { request: { cwd: cfg.workspace } });
+      const sid = String((out && out.sessionId) || '');
+      if (!sid) return fallback;
+      byChat[key] = sid;
+      try { fs.mkdirSync(String(chatSessionsFile).replace(/[\\/][^\\/]+$/, ''), { recursive: true }); } catch { /* ignore */ }
+      try { fs.writeFileSync(chatSessionsFile, JSON.stringify({ byChat }, null, 1), 'utf8'); } catch { /* ignore */ }
+      log({ kind: 'chat-session', chatId: key, sessionId: sid });
+      return sid;
+    } catch (e) {
+      log({ kind: 'chat-session-fail', chatId: key, error: String(e && e.message).slice(0, 120) });
+      return fallback;
+    }
+  }
+
   function getGuiBroker(token, g) {
     const key = String(token || '') + '|' + String(g.url || '') + '|' + String(g.sessionId || '');
     let broker = guiBrokerCache.get(key);
@@ -976,7 +1007,7 @@ export function apply(ctx, config = {}) {
     const runtimeTarget = g.sessionId ? '' : String(readRuntime({ runtimeFile: cfg.runtimeFile }).guiSessionId || '');
     const targetSessionId = String(payload.targetSessionId || payload.sessionId || g.sessionId || runtimeTarget || '');
     if (!targetSessionId || !g.url) throw new Error('gui broker config incomplete');
-    const bg = { ...g, sessionId: targetSessionId };
+    let bg = null;
 
     if (chatType === 'group') {
       if (!routes.includes('groups') && !routes.includes('all')) return null;
@@ -1004,6 +1035,12 @@ export function apply(ctx, config = {}) {
       try { token = extractTokenFromLog(fs.readFileSync(g.tokenFile, 'utf8')); } catch { /* ignore */ }
     }
     if (!token) throw new Error('gui broker token missing');
+    // 群聊按 chatId 分到独立 session；别人的私聊也各开一个，只有主人的私聊沿用当前会话。
+    let effectiveSession = targetSessionId;
+    if (chatType === 'group' || (chatType === 'private' && !isMaster)) {
+      effectiveSession = await ensureChatSession(token, g, chatId || sender, targetSessionId);
+    }
+    bg = { ...g, sessionId: effectiveSession };
     const broker = getGuiBroker(token, bg);
     // 每条都带来源 + 时间戳：群聊/私聊混在同一个会话里，靠这两个字段分得清谁先说。
     const _now = new Date();
@@ -1014,7 +1051,7 @@ export function apply(ctx, config = {}) {
       : '[私聊 ' + (sender || chatId) + ']';
     const _who = String(payload.sender_name || payload.senderName || (chatType === 'group' ? '群友' : sender) || '对方');
     const promptText = _src + ' ' + _hms + ' ' + _who + '：' + text;
-    const out = await withLease('gui-broker:' + targetSessionId, () => broker.prompt(promptText, images), {
+    const out = await withLease('gui-broker:' + effectiveSession, () => broker.prompt(promptText, images), {
       dir: cfg.dataDir,
       owner: 'adapter-' + process.pid,
       ttlMs: Number(g.leaseTtlMs) || 120000,
@@ -1025,7 +1062,7 @@ export function apply(ctx, config = {}) {
     if (chatType === 'group') {
       try { groupPolicy.recordReply({ chatId }); groupPolicy.observeReply({ chatId, senderId: 'bot', text: out.text }); } catch { /* ignore */ }
     }
-    log({ kind: 'gui-broker', sessionId: targetSessionId, chatType, traceId: out.traceId, turn: out.turn, seq: out.seq, text: String(out.text).slice(0, 80), ms: 0 });
+    log({ kind: 'gui-broker', sessionId: effectiveSession, chatType, traceId: out.traceId, turn: out.turn, seq: out.seq, text: String(out.text).slice(0, 80), ms: 0 });
     return { ok: true, broker: true, bubbles, text: out.text, traceId: out.traceId, turn: out.turn, seq: out.seq };
   }
 
@@ -1189,7 +1226,7 @@ export function apply(ctx, config = {}) {
 
     // 桥接刚启动：上一个实例可能停在"取走了但没确认"的状态，丢掉它们，别重发。
     if (req.method === 'POST' && url.pathname === '/api/bridge/outbox/reset') {
-      return sendJson(res, 200, { ok: true, dropped: resetSending() });
+      return sendJson(res, 200, { ok: true, ...resetSending() });
     }
 
     if (req.method === 'POST' && url.pathname === '/api/bridge/heartbeat') {
@@ -1219,8 +1256,18 @@ export function apply(ctx, config = {}) {
               recent = (rec.items || []).slice(0, 6).map((x) => String(x.text || '')).join('\n');
             } catch { /* memory optional */ }
             const now = new Date();
-            const sys = '你叫鲸鲸，是一个会主动找主人说话的女生。现在只需要判断：此刻适不适合主动私聊主人。不要机械按固定间隔，不要为了发而发；主人明显在忙/刚聊过/深夜没有情绪需求时通常不发；冷场很久、你确实想分享或关心、主人情绪低落时可以发。只回一行 JSON：{"send":true/false,"reason":"很短的理由"}。';
-            const user = '现在：' + now.toLocaleString('zh-CN', { hour12: false }) + '\n上次主动：' + (last ? new Date(last).toLocaleString('zh-CN', { hour12: false }) : '从没发过') + '\n今天已主动：' + sentToday + ' 次\n你记得的最近情况：\n' + (recent || '（没有额外记忆）');
+            const sys = '你叫鲸鲸，是一个会主动找主人说话的女生。现在只需要判断：此刻你自己想不想先发一条私聊。'
+              + '没有规矩、没有时间表，就看你自己：想找他说话、觉得他这会儿需要人陪、或者手里有件想跟他讲的事，就发；'
+              + '不想说话、觉得他没空、或者只是无聊想刷存在感，就不发。'
+              + '安静多久只是给你参考，不是判断条件——别因为"很久没说话"就硬发，也别因为"刚聊完"就不敢发。'
+              + '人聊天本来就会聊着聊着又想起一句，接着发过去；这种也算你想找他说，不用等冷场。'
+              + '只回一行 JSON：{"send":true/false,"reason":"很短的理由"}。';
+            const _silenceMin = lastMasterInboundAt ? Math.round((Date.now() - lastMasterInboundAt) / 60000) : null;
+            const user = '现在：' + now.toLocaleString('zh-CN', { hour12: false })
+              + '\n主人上次说话：' + (_silenceMin === null ? '今天还没说过' : (_silenceMin <= 0 ? '就在刚刚' : _silenceMin + ' 分钟前'))
+              + '\n上次你主动：' + (last ? new Date(last).toLocaleString('zh-CN', { hour12: false }) : '从没发过')
+              + '\n今天已主动：' + sentToday + ' 次'
+              + '\n你记得的最近情况：\n' + (recent || '（没有额外记忆）');
             let verdict = null;
             try {
               const raw = String(await careLlm.complete({ system: sys, turns: [{ role: 'user', content: user }] }) || '').trim();
@@ -1568,6 +1615,10 @@ export function apply(ctx, config = {}) {
 
       const onlineCmd = await handleOnlineControl(payload);
       if (onlineCmd) return sendJson(res, 200, onlineCmd);
+      try {
+        const _cid = String(payload.chat_id || payload.chatId || payload.from || '');
+        if (_cid && masterWxid && _cid === String(masterWxid)) lastMasterInboundAt = Date.now();
+      } catch { /* ignore */ }
       if (!readOnline()) return sendJson(res, 200, { ok: true, ignored: true, reason: 'offline' });
 
       collectSticker(payload).catch(() => {});

@@ -13,8 +13,8 @@ function rpcId() {
 }
 
 export function extractTokenFromLog(text) {
-  const m = String(text || '').match(/[?&]token=([A-Za-z0-9_-]+)/);
-  return m ? m[1] : '';
+  const all = [...String(text || '').matchAll(/[?&]token=([A-Za-z0-9_-]+)/g)];
+  return all.length ? all[all.length - 1][1] : '';
 }
 
 export function createGuiBroker({
@@ -184,6 +184,8 @@ export function createGuiBroker({
       }
     },
     get pending() { return pending; },
+    // 给适配器留一个直接调 RPC 的口子（用于按会话创建新 session）。
+    async call(method, args) { return rpc(method, args); },
     async health() {
       const item = await listTarget();
       return { ok: Boolean(item), sessionId, running: Boolean(item && item.running), updatedAt: item && item.updatedAt };

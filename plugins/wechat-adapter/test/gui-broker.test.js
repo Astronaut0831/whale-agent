@@ -24,6 +24,7 @@ function item({ seq = 10, response = '', running = false, updated = 1000, prompt
 
 test('extractTokenFromLog', () => {
   assert.equal(extractTokenFromLog('dsh web: http://127.0.0.1:3080/?token=abc-def'), 'abc-def');
+  assert.equal(extractTokenFromLog('?token=old\n?token=new'), 'new');
   assert.equal(extractTokenFromLog('no token'), '');
 });
 
