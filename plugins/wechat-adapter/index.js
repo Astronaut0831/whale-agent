@@ -1164,18 +1164,29 @@ let lastMasterInboundAt = 0;
     if (guiInputInflight.has(key)) return;
     guiInputInflight.add(key);
     const prev = guiInputJobs.get(key) || {};
-    guiInputJobs.set(key, { ...prev, at: Date.now(), status: 'queued', requestId: key, targetSessionId, text });
+    guiInputJobs.set(key, { ...prev, at: Date.now(), status: 'queued', requestId: key, targetSessionId, text, attempts: Number(prev.attempts || 0) });
     Promise.resolve()
       .then(async () => {
         guiInputJobs.set(key, { ...(guiInputJobs.get(key) || {}), at: Date.now(), status: 'running' });
         const value = await runGuiInput(text, targetSessionId);
         rememberGuiInput(key, value);
-        guiInputJobs.set(key, { ...(guiInputJobs.get(key) || {}), at: Date.now(), status: 'done', value });
+        guiInputJobs.set(key, { ...(guiInputJobs.get(key) || {}), at: Date.now(), status: 'done', value, error: undefined });
         log({ kind: 'gui-input-async', requestId: key, targetSessionId, traceId: value.traceId, turn: value.turn, seq: value.seq });
       })
       .catch((e) => {
-        guiInputJobs.set(key, { ...(guiInputJobs.get(key) || {}), at: Date.now(), status: 'error', error: String(e && e.message) });
-        log({ kind: 'gui-input-async-fail', requestId: key, targetSessionId, error: String(e && e.message).slice(0, 200) });
+        const cur = guiInputJobs.get(key) || {};
+        const attempts = Number(cur.attempts || 0) + 1;
+        const message = String(e && e.message);
+        if (attempts < 3) {
+          const delay = Math.min(15000, 1000 * (2 ** attempts));
+          guiInputJobs.set(key, { ...cur, at: Date.now(), status: 'queued', attempts, lastError: message, nextAt: Date.now() + delay });
+          log({ kind: 'gui-input-async-retry', requestId: key, targetSessionId, attempts, delay, error: message.slice(0, 200) });
+          const retryTimer = setTimeout(() => startGuiInputJob(key, targetSessionId, text), delay);
+          if (retryTimer.unref) retryTimer.unref();
+          return;
+        }
+        guiInputJobs.set(key, { ...cur, at: Date.now(), status: 'error', attempts, error: message });
+        log({ kind: 'gui-input-async-fail', requestId: key, targetSessionId, attempts, error: message.slice(0, 200) });
       })
       .finally(() => guiInputInflight.delete(key));
   }
