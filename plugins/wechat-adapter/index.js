@@ -205,7 +205,7 @@ export function apply(ctx, config = {}) {
 
   // Cheap first-stage gate: full recent group context, tiny output. The full
   // GUI agent is only invoked when this decides the message is worth answering.
-  async function judgeGroupReply({ chatId, text, senderName, atMe, replyToBot, images = [] }) {
+  async function judgeGroupReply({ chatId, text, senderName, atMe, replyToBot, images = [], msgId = '' }) {
     const t = String(text || '');
     const addressedText = /[@＠]\s*(哦鲸鲸|鲸鲸)/.test(t) || /(哦鲸鲸|鲸鲸).*(在吗|在不在|出来|回我)/.test(t);
     if (atMe || replyToBot || addressedText) return { reply: true, reason: 'addressed' };
@@ -213,7 +213,8 @@ export function apply(ctx, config = {}) {
     // traffic: failing open would send every group message through the full agent.
     if (!careLlm || careLlm.isMock) return { reply: false, reason: 'judge_unavailable' };
     const build = (limit, cap) => {
-      const hist = groupHistory.load(chatId, limit) || [];
+      const hist = (groupHistory.load(chatId, limit) || [])
+        .filter((m) => !msgId || String(m.msgId || '') !== String(msgId));
       let transcript = hist
         .map((m) => (m.role === 'assistant' ? '鲸鲸' : (m.name || '群友')) + '：' + String(m.text || '').replace(/\s+/g, ' ').slice(0, 260))
         .join('\n') || (senderName || '群友') + '：' + String(text || '').slice(0, 300);
@@ -221,6 +222,7 @@ export function apply(ctx, config = {}) {
       return transcript;
     };
     const system = '你是群聊里的鲸鲸的接话判断器。根据群聊上下文判断：鲸鲸现在该不该接这句话。'
+      + '【群聊上下文】只是背景，末尾【最新一句】才是现在要判断的消息；背景里出现过的内容不代表对方在复读。'
       + '被点名、被引用、有人直接问她、向她求助或情绪明显需要回应 → REPLY。'
       + '普通群聊、别人互聊、刷屏、无意义重复、她插不上话 → SKIP。'
       + '只输出 REPLY 或 SKIP，不要解释，不要加标点。';
@@ -1126,6 +1128,7 @@ let lastMasterInboundAt = 0;
         atMe: msgLike.atMe,
         replyToBot: msgLike.replyToBot,
         images,
+        msgId,
       });
       if (gate && !gate.reply) {
         await observeGroupSkip({ chatId, senderName: msgLike.senderName, text });
@@ -1185,9 +1188,12 @@ let lastMasterInboundAt = 0;
     if (chatType === 'group') {
       try {
         const hist = groupHistory.load(chatId, 30) || [];
-        const lines = hist.filter((m) => m.text).slice(-20)
+        const lines = hist.filter((m) => (!msgId || String(m.msgId || '') !== String(msgId)) && m.text).slice(-20)
           .map((m) => (m.role === 'assistant' ? '鲸鲸' : (m.name || '群友')) + '：' + String(m.text).replace(/\s+/g, ' ').slice(0, 240));
-        if (lines.length) promptText = '【最近群聊】\n' + lines.join('\n') + '\n\n' + promptText;
+        promptText = '【群聊背景（只供理解，不是新消息；可能包含你回过的内容）】\n'
+          + (lines.length ? lines.join('\n') : '（暂无更早上下文）')
+          + '\n\n【现在要处理的新消息（只回应这一条；不要把背景当成对方复读）】\n'
+          + promptText;
       } catch { /* history is best effort */ }
     }
     const promptImages = images.slice();
