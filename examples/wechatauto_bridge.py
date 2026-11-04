@@ -72,6 +72,10 @@ LISTEN_ENABLED = False
 LISTEN_GROUPS = []
 LISTEN_PRIVATES = []
 MASTER_WXIDS = set()
+# Register per whitelisted chat instead of Listener.add_all(): the third-party
+# per-user DB workers can hit a native access violation under many threads.
+LISTENER_REF = None
+LISTEN_ACTIVE = set()
 LISTEN_BLOCKED_FILE = os.path.join(os.path.dirname(CONFIG_PATH), 'data', 'listen-blocked.json')
 
 
@@ -3728,8 +3732,34 @@ def main():
         except Exception as e:
             log("提交消息处理失败：", repr(e))
 
+    def apply_listen(listener):
+        global LISTENER_REF, LISTEN_ACTIVE
+        if listener is not None:
+            LISTENER_REF = listener
+        if LISTENER_REF is None:
+            return
+        desired = set()
+        if LISTEN_ENABLED:
+            desired.update(LISTEN_GROUPS)
+            desired.update(LISTEN_PRIVATES)
+            # 主人的私聊不走白名单，on_message_inner 也会放行
+            desired.update(MASTER_WXIDS)
+        for user in desired - LISTEN_ACTIVE:
+            try:
+                LISTENER_REF.add_listener(user, on_message)
+                LISTEN_ACTIVE.add(user)
+            except Exception as e:
+                log("注册监听失败：", user, repr(e)[:80])
+        for user in LISTEN_ACTIVE - desired:
+            try:
+                LISTENER_REF.remove_listener(user, on_message)
+            except Exception:
+                pass
+            LISTEN_ACTIVE.discard(user)
+
     listener = Listener(db, interval=0.4)
-    listener.add_all(on_message)
+    LISTENER_REF = listener
+    apply_listen(listener)
     listener.start()
     def recent_chats(limit=2, within=1800):
         out = []
@@ -4315,6 +4345,7 @@ def main():
             last = mt
             if reload_config():
                 load_listen()
+                apply_listen(listener)
                 log("监听白名单： %s | 群 %r | 私聊 %r" % ("开" if LISTEN_ENABLED else "关", LISTEN_GROUPS, LISTEN_PRIVATES))
                 log("配置已热更新（调试台改完即时生效，不用重启桥接）")
 
