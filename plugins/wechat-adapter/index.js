@@ -1037,7 +1037,8 @@ let lastMasterInboundAt = 0;
     if (byChat[key]) return { sid: String(byChat[key]), created: false };
     try {
       const boot = getGuiBroker(token, { ...g, sessionId: fallback || String(g.sessionId || '') || 'bootstrap' });
-      const out = await boot.call('session/create', { request: { cwd: cfg.workspace } });
+      const createRequest = cfg.workspaceId ? { workspaceId: String(cfg.workspaceId) } : { cwd: cfg.workspace };
+      const out = await boot.call('session/create', { request: createRequest });
       const sid = String((out && out.sessionId) || '');
       if (!sid) return { sid: fallback, created: false };
       const label = String(title || '').trim().slice(0, 60);
