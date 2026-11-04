@@ -1845,7 +1845,11 @@ def main():
         try:
             import win32api
             import win32con
-            hwnd = int(ACCOUNT.get("hwnd") or 0) or find_weixin_hwnd()
+            hwnd = int(ACCOUNT.get("hwnd") or 0)
+            if not hwnd:
+                # 认不出哪个窗口是鲸鲸的账号时，宁可这次不发，也不把你正在用的那个微信拉到前台
+                log("账号窗口未确认，跳过前台兜底（避免拉错账号的窗口）")
+                return False
             if hwnd:
                 force_foreground(hwnd)
             time.sleep(0.10)
@@ -2861,16 +2865,19 @@ def main():
                 return None, ""
             path = None
             _src = ""
-            # 1) 优先原图（_h.dat）
-            try:
-                path = _get_media().download_image(user, int(lid), tier="original", shard=shard)
-            except Exception as _e1:
-                log("图片 original 档失败（%s/%s）：%s" % (user, lid, repr(_e1)[:120]))
-                path = None
-            if path:
-                _src = "local-original"
-            # 2) 没有原图时用 mid 压缩版（不是 _t 缩略图），一般足够视觉模型看
-            if not path:
+            # 1/2) 先拿本机档位。微信刚落盘要一点时间，第一下没拿到就等一会儿再试，
+            #      别立刻退到截图（截图只有低清，之前一直吃亏在这）。
+            for _try in range(4):
+                if _try:
+                    time.sleep(0.6 * _try)
+                try:
+                    path = _get_media().download_image(user, int(lid), tier="original", shard=shard)
+                except Exception as _e1:
+                    log("图片 original 档失败（%s/%s）：%s" % (user, lid, repr(_e1)[:120]))
+                    path = None
+                if path:
+                    _src = "local-original"
+                    break
                 try:
                     path = _get_media().download_image(user, int(lid), tier="mid", shard=shard)
                 except Exception as _e2:
@@ -2878,6 +2885,7 @@ def main():
                     path = None
                 if path:
                     _src = "local-mid"
+                    break
             # 3) 界面下载原图会点「保存」并留下对话框，默认不做；要看原图请自己保存
             _allow_ui_dl = bool(((cfg.get("vision") or {}).get("uiDownloadOriginal", False)))
             if not path and not _allow_ui_dl:

@@ -1,6 +1,6 @@
 /** 记忆核心：每轮结束把对话写进海马体，由记忆服务处理短/长期。 */
 
-import { resolveTarget, resolveMemoryToken } from '../lib/runtime.js';
+import { resolveTarget, resolveMemoryToken, scopeForSession } from '../lib/runtime.js';
 
 export const name = 'whale-memory-core';
 
@@ -46,6 +46,9 @@ export function lastTurn(messages) {
 export function resolveScope(sessionId, config = {}, envScope = '') {
   const env = String(envScope || '');
   if (env) return env;
+  // 群/私聊独立会话：按 chat-sessions.json 反查出各自的 scope
+  const perChat = scopeForSession(sessionId, config);
+  if (perChat) return perChat;
   const target = String(config.targetSessionId || '');
   if (!target || !sessionId || String(sessionId) !== target) return '';
   return String(config.scope || '');

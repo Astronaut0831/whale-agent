@@ -75,16 +75,29 @@ export function ack(ids, ok = true) {
 }
 
 /**
- * 桥接重启时调用：把「取走了但没确认」的条目标成已处理并丢掉。
- * 那些多半已经发出去了，留下只会被 60 秒后的重取再发一遍 → 整段重复。
+ * 桥接重启时调用，处理「取走了但没确认」的条目：
+ * - 取出不到 15 秒的：多半还没发出去，放回 pending 重发（否则消息直接丢）；
+ * - 更早的：大概率已发出，丢掉，避免整段重复。
  */
 export function resetSending() {
   const d = load();
-  const before = d.items.length;
-  d.items = d.items.filter((it) => it.status !== 'sending');
-  const dropped = before - d.items.length;
-  if (dropped) save(d);
-  return dropped;
+  const now = Date.now();
+  let revived = 0;
+  let dropped = 0;
+  d.items = d.items.filter((it) => {
+    if (it.status !== 'sending') return true;
+    const age = now - Number(it.takenAt || 0);
+    if (age < 15000) {
+      it.status = 'pending';
+      it.attempts = Number(it.attempts || 0);
+      revived += 1;
+      return true;
+    }
+    dropped += 1;
+    return false;
+  });
+  if (revived || dropped) save(d);
+  return { revived, dropped };
 }
 
 export function stats() {  const d = load();

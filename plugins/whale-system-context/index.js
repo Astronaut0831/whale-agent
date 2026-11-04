@@ -3,7 +3,7 @@
  * headless 用 env 传入；GUI 只给 targetSessionId 注入，不污染其它会话。
  */
 
-import { resolveTarget } from '../lib/runtime.js';
+import { resolveTarget, scopeForSession } from '../lib/runtime.js';
 import { prefsBlock, selfnoteBlock } from '../lib/context-data.js';
 
 export const name = 'whale-system-context';
@@ -43,20 +43,35 @@ export function apply(ctx, config = {}) {
   const addFor = (agent) => {
     addSection(agent && agent.ctx && agent.ctx.systemPrompt, legacyContextText(config.env || process.env));
   };
-  ctx.on('agent/created', ({ agent } = {}) => {
+  // 群/私聊独立会话：也给一段，但比主会话短（规矩少一点、自省少一点）。
+  const addShortFor = (agent) => {
+    const prefs = prefsBlock({ max: 4 });
+    const self = selfnoteBlock({ n: 2 });
+    const text = buildContextText({ WHALE_PREFS_BLOCK: prefs, WHALE_SELFNOTE_BLOCK: self });
+    addSection(agent && agent.ctx && agent.ctx.systemPrompt, text);
+  };
+  const allowSession = (sid) => {
     const target = resolveTarget(config);
+    if (target && sid && String(sid) === target) return 'full';
+    if (sid && scopeForSession(sid, config)) return 'short';
+    return '';
+  };
+  ctx.on('agent/created', ({ agent } = {}) => {
     const sid = agent && agent.session && agent.session.id;
-    if (!target || !sid || String(sid) !== target) return;
-    addFor(agent);
+    const mode = allowSession(sid);
+    if (!mode) return;
+    if (mode === 'full') addFor(agent); else addShortFor(agent);
   });
   // A target can be resumed before the plugin was applied; add the section on
   // the next turn as well. Same section name replaces the previous layer.
   ctx.on('session/event', (session, event) => {
     if (!event || event.type !== 'turn/start') return;
-    const target = resolveTarget(config);
-    if (!target || !session || String(session.id) !== target) return;
-    const agent = ctx.agents && typeof ctx.agents.get === 'function' ? ctx.agents.get(session.id) : null;
-    if (agent) addFor(agent);
+    const sid = session && session.id;
+    const mode = allowSession(sid);
+    if (!mode) return;
+    const agent = ctx.agents && typeof ctx.agents.get === 'function' ? ctx.agents.get(sid) : null;
+    if (!agent) return;
+    if (mode === 'full') addFor(agent); else addShortFor(agent);
   });
 }
 
