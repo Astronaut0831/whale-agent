@@ -202,6 +202,56 @@ export function apply(ctx, config = {}) {
   });
   const masterWxid = String(((whale.persona || {}).master || {}).wxids?.[0] || '');
   const token = String(((whale.gateway || {}).wechat || {}).inboundToken || '');
+
+  // Cheap first-stage gate: full recent group context, tiny output. The full
+  // GUI agent is only invoked when this decides the message is worth answering.
+  async function judgeGroupReply({ chatId, text, senderName, atMe, replyToBot }) {
+    if (atMe || replyToBot) return { reply: true, reason: 'addressed' };
+    // If the cheap judge is unavailable, default to SKIP for non-addressed
+    // traffic: failing open would send every group message through the full agent.
+    if (!careLlm || careLlm.isMock) return { reply: false, reason: 'judge_unavailable' };
+    try {
+      const hist = groupHistory.load(chatId, 200) || [];
+      const transcript = hist
+        .map((m) => (m.role === 'assistant' ? '鲸鲸' : (m.name || '群友')) + '：' + String(m.text || '').replace(/\s+/g, ' ').slice(0, 300))
+        .join('\n') || (senderName || '群友') + '：' + String(text || '').slice(0, 300);
+      const system = '你是群聊里的鲸鲸的接话判断器。根据完整群聊上下文判断：鲸鲸现在该不该接这句话。'
+        + '被点名、被引用、有人直接问她、向她求助或情绪明显需要回应 → REPLY。'
+        + '普通群聊、别人互聊、刷屏、无意义重复、她插不上话 → SKIP。'
+        + '只输出 REPLY 或 SKIP，不要解释，不要加标点。';
+      const out = await careLlm.complete({
+        system,
+        turns: [{ role: 'user', content: '【群聊上下文】\n' + transcript + '\n\n【最新一句】\n' + (senderName || '群友') + '：' + String(text || '').slice(0, 1000) }],
+        maxTokens: 8,
+        skipGovernor: true,
+      });
+      const raw = String(out || '').trim().toUpperCase();
+      const reply = raw.includes('REPLY');
+      log({ kind: 'group-judge', chatId, reply, raw: raw.slice(0, 20) });
+      return reply ? { reply: true, reason: 'judge_reply' } : { reply: false, reason: 'judge_skip' };
+    } catch (e) {
+      log({ kind: 'group-judge-fail', chatId, error: String(e && e.message).slice(0, 120) });
+      return { reply: false, reason: 'judge_fail' };
+    }
+  }
+
+  async function observeGroupSkip({ chatId, senderName, text }) {
+    try {
+      if (!cfg.memoryUrl) return;
+      await fetch(String(cfg.memoryUrl).replace(/\/+$/, '') + '/observe', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', ...(token ? { 'x-bot-token': token } : {}) },
+        body: JSON.stringify({
+          scope: 'wechat:g:' + chatId,
+          user: (senderName || '群友') + '：' + String(text || ''),
+          assistant: '',
+          ts: Date.now(),
+        }),
+        signal: AbortSignal.timeout(3000),
+      });
+    } catch { /* memory must not block chat */ }
+  }
+
   const writeWhaleConfig = (obj) => {
     try { fs.writeFileSync(cfg.whaleConfigPath, JSON.stringify(obj, null, 2), 'utf8'); return true; } catch { return false; }
   };
@@ -1028,8 +1078,20 @@ let lastMasterInboundAt = 0;
         ts: Number(payload.timestamp || payload.ts) || Date.now(),
       };
       // Full autonomy: every whitelisted group message reaches the agent.
-      // The agent itself decides whether to answer; no score/cooldown gate.
+      // A cheap first-stage judge decides whether the expensive GUI agent is needed.
       try { groupPolicy.observe(msgLike); } catch { /* ignore */ }
+      const gate = await judgeGroupReply({
+        chatId,
+        text,
+        senderName: msgLike.senderName,
+        atMe: msgLike.atMe,
+        replyToBot: msgLike.replyToBot,
+      });
+      if (gate && !gate.reply) {
+        await observeGroupSkip({ chatId, senderName: msgLike.senderName, text });
+        log({ kind: 'group-skip', chatId, reason: gate.reason, text: String(text).slice(0, 80) });
+        return { ok: true, ignored: true, reason: gate.reason };
+      }
     } else if (chatType === 'private') {
       const allowed = isMaster
         ? (routes.includes('master') || routes.includes('all-private') || routes.includes('all') || routes.length === 0)
