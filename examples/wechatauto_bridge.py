@@ -2960,10 +2960,34 @@ def main():
             log("图片字节读取失败：", repr(e))
             return None, ""
 
+    def _sticker_image_ok(img):
+        """Reject text/reference crops that are wide, short, or tiny."""
+        try:
+            w, h = img.size
+            if w < 80 or h < 80:
+                return False
+            ratio = float(w) / max(1.0, float(h))
+            return 0.55 <= ratio <= 1.8
+        except Exception:
+            return False
+
+    def _sticker_file_ok(path):
+        try:
+            from PIL import Image as _PI
+            with _PI.open(path) as _im:
+                return _sticker_image_ok(_im)
+        except Exception:
+            return False
+
     def _row_prefers_sticker(kid):
         try:
+            _row_cn = str(getattr(kid, 'ClassName', '')).lower()
+            if any(x in _row_cn for x in ('refer', 'quote', 'avatar', 'headimage')):
+                return False
             for _c in kid.GetChildren():
                 _cn = str(getattr(_c, 'ClassName', '')).lower()
+                if any(x in _cn for x in ('refer', 'quote', 'avatar', 'headimage')):
+                    continue
                 if 'image' in _cn or 'emoji' in _cn or 'sticker' in _cn:
                     return True
         except Exception:
@@ -2979,7 +3003,13 @@ def main():
             os.makedirs(STICKER_CACHE_DIR, exist_ok=True)
             out = os.path.join(STICKER_CACHE_DIR, md5 + ".png")
             if os.path.exists(out) and os.path.getsize(out) > 0:
-                return out
+                if _sticker_file_ok(out):
+                    return out
+                log("表情缓存不是表情，丢弃重建：", md5[:8])
+                try:
+                    os.remove(out)
+                except Exception:
+                    pass
             with gui_lock:
                 if gui is None:
                     gui = WeChatGUI()
@@ -2995,6 +3025,10 @@ def main():
                 kids = lst.GetChildren() if lst else []
                 if kids:
                     row = next((_k for _k in reversed(kids) if _row_prefers_sticker(_k)), kids[-1])
+                    _row_cn = str(getattr(row, 'ClassName', '')).lower()
+                    if any(x in _row_cn for x in ('refer', 'quote', 'avatar', 'headimage')):
+                        log("表情截图：选到引用/头像行，跳过：", _row_cn)
+                        return ""
                     try:
                         _nm = str(row.Name or "")
                         if "[" in _nm and "]" in _nm:
@@ -3117,6 +3151,9 @@ def main():
                 w, h = img.size
                 img = img.crop((0, max(0, h - 340), w, h))
                 log("表情截图：退回底部条带")
+            if not _sticker_image_ok(img):
+                log("表情截图：尺寸/比例不像表情，丢弃：%dx%d" % (img.size[0], img.size[1]))
+                return ""
             img.save(out)
             log("表情截图成功：%s（%d KB）" % (md5[:8], os.path.getsize(out) // 1024))
             return out
