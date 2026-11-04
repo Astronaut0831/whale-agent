@@ -7,6 +7,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { describe as describeImage } from '../plugins/lib/vision.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const DATA = path.join(ROOT, 'data');
@@ -38,6 +39,39 @@ function creds() {
   const appSecret = String(c.appSecret || process.env.QQBOT_SECRET || '');
   if (!appId || !appSecret) throw new Error('missing QQBOT_APPID/QQBOT_SECRET or ' + CRED_FILE);
   return { appId, appSecret };
+}
+
+function appConfig() {
+  try { return JSON.parse(fs.readFileSync(path.join(ROOT, 'config.json'), 'utf8')); } catch { return {}; }
+}
+
+async function mediaText(msg) {
+  const parts = [];
+  const sender = String(msg.senderName || 'QQ用户');
+  const attachments = Array.isArray(msg.attachments) ? msg.attachments : [];
+  for (const a of attachments.slice(0, 3)) {
+    const type = String(a.content_type || '');
+    if (type.startsWith('image/')) {
+      try {
+        const r = await fetch(a.url, { headers: { 'user-agent': 'Mozilla/5.0' }, signal: AbortSignal.timeout(20000) });
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        const b64 = Buffer.from(await r.arrayBuffer()).toString('base64');
+        const desc = await describeImage(appConfig(), {
+          imageBase64: b64, mime: type,
+          prompt: '这是QQ聊天里的图片。只描述能确定的内容：人物、动作、物品、场景、文字；不要猜。不超过60字。',
+        });
+        parts.push('【图片（' + sender + '）】' + String(desc || '').trim());
+      } catch (e) {
+        parts.push('【图片（' + sender + '）】（没看清：' + String(e && e.message || e).slice(0, 80) + '）');
+      }
+    } else if (type === 'voice') {
+      const asr = String(a.asr_refer_text || '').trim();
+      parts.push('【语音（' + sender + '）】' + (asr || '（语音转写不可用）'));
+    } else {
+      parts.push('【文件（' + sender + '）】' + String(a.filename || '未命名') + (a.size ? '，' + Math.round(Number(a.size) / 1024) + 'KB' : ''));
+    }
+  }
+  return parts.join('\n');
 }
 
 function state() {
@@ -103,6 +137,8 @@ async function main() {
         ? { scope: 'group', targetId: chatId, msgId: msg.messageId }
         : { scope: 'c2c', targetId: chatId, msgId: msg.messageId };
       remember(chatId, target);
+      const media = await mediaText(msg);
+      const text = [String(msg.content || '').trim(), media].filter(Boolean).join('\n');
       const payload = {
         platform: 'qq',
         chat_id: chatId,
@@ -110,7 +146,7 @@ async function main() {
         msg_id: String(msg.messageId || ''),
         sender_id: String(msg.senderId || ''),
         sender_name: String(msg.senderName || 'QQ用户'),
-        text: String(msg.content || ''),
+        text,
         at_me: group && (msg.rawEventType === 'GROUP_AT_MESSAGE_CREATE' || msg.rawEventType === 'AT_MESSAGE_CREATE'),
         chat_title: group ? String(msg.groupOpenid || '') : String(msg.senderName || ''),
         ts: msg.timestamp || Date.now(),
@@ -135,10 +171,18 @@ async function main() {
       const done = [];
       for (const item of items) {
         try {
-          const text = String(item.text || '');
-          if (!text.trim()) { done.push(item.id); continue; }
           const target = targetFor(item);
           if (!target.targetId) throw new Error('missing target for ' + item.chatId);
+          const file = String(item.file || '');
+          if (item.kind === 'file' && file) {
+            if (!fs.existsSync(file)) throw new Error('file missing: ' + file);
+            await bot.sendFile(target, { localPath: file });
+            done.push(item.id);
+            log('[out]', target.scope, target.targetId, 'file=' + path.basename(file));
+            continue;
+          }
+          const text = String(item.text || '');
+          if (!text.trim()) { done.push(item.id); continue; }
           await bot.sendText(target, text);
           done.push(item.id);
           log('[out]', target.scope, target.targetId, text.slice(0, 40));
