@@ -227,7 +227,9 @@ export function apply(ctx, config = {}) {
       + '普通群聊、别人互聊、刷屏、无意义重复、她插不上话 → SKIP。'
       + '只输出 REPLY 或 SKIP，不要解释，不要加标点。';
     const tryOnce = async (limit, cap, useImage = true) => {
-      const userText = '【群聊上下文】\n' + build(limit, cap) + '\n\n【最新一句】\n' + (senderName || '群友') + '：' + String(text || '').slice(0, 1000);
+      const userText = '【群聊上下文】\n' + build(limit, cap)
+        + '\n\n【最新一句】\n' + (senderName || '群友') + '：' + String(text || '').slice(0, 1000)
+        + (useImage && images.length ? '\n【当前图片发送者】' + (senderName || '群友') : '');
       const content = (useImage && images.length)
         ? [
           { type: 'text', text: userText },
@@ -1079,11 +1081,12 @@ let lastMasterInboundAt = 0;
     const text = String(payload.text || payload.content || '').trim();
     if (!text || text.startsWith('/')) return null;
     const rawImage = String(payload.image || payload.image_base64 || '').replace(/^data:[^,]*,/, '');
+    const currentSender = String(payload.sender_name || payload.senderName || '群友');
     const images = rawImage ? [{
       type: 'image',
       mediaType: String(payload.mime || 'image/png').split(';')[0],
       data: rawImage,
-      name: 'wechat-image',
+      name: '图片1（当前消息，' + currentSender + '）',
     }] : [];
     const chatId = String(payload.chat_id || payload.chatId || '');
     const msgId = String(payload.msg_id || payload.msgId || '');
@@ -1200,10 +1203,10 @@ let lastMasterInboundAt = 0;
     if (chatType === 'group') {
       try {
         const hist = groupHistory.load(chatId, 30) || [];
-        const seen = new Set(promptImages.map((im) => im.name));
+        const seen = new Set([currentImagePath].filter(Boolean));
         for (const m of hist.slice(-8).reverse()) {
           if (promptImages.length >= 4) break;
-          if (!m.imagePath || m.imagePath === currentImagePath || seen.has(m.imagePath)) continue;
+          if (!m.imagePath || seen.has(m.imagePath)) continue;
           if (!fs.existsSync(m.imagePath)) continue;
           try {
             const data = fs.readFileSync(m.imagePath).toString('base64');
@@ -1211,12 +1214,17 @@ let lastMasterInboundAt = 0;
               type: 'image',
               mediaType: String(m.mime || 'image/jpeg'),
               data,
-              name: m.imagePath,
+              name: '图片' + (promptImages.length + 1) + '（历史消息，' + (m.name || '群友') + '）',
             });
             seen.add(m.imagePath);
           } catch { /* skip unreadable image */ }
         }
       } catch { /* image context is best effort */ }
+    }
+    if (promptImages.length) {
+      promptText = '【图片对应（按附图顺序）】\n'
+        + promptImages.map((im, i) => '图' + (i + 1) + '：' + im.name).join('\n')
+        + '\n\n' + promptText;
     }
     const out = await withLease('gui-broker:' + effectiveSession, () => broker.prompt(promptText, promptImages), {
       dir: cfg.dataDir,
