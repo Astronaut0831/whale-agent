@@ -206,33 +206,47 @@ export function apply(ctx, config = {}) {
   // Cheap first-stage gate: full recent group context, tiny output. The full
   // GUI agent is only invoked when this decides the message is worth answering.
   async function judgeGroupReply({ chatId, text, senderName, atMe, replyToBot }) {
-    if (atMe || replyToBot) return { reply: true, reason: 'addressed' };
+    const t = String(text || '');
+    const addressedText = /[@＠]\s*(哦鲸鲸|鲸鲸)/.test(t) || /(哦鲸鲸|鲸鲸).*(在吗|在不在|出来|回我)/.test(t);
+    if (atMe || replyToBot || addressedText) return { reply: true, reason: 'addressed' };
     // If the cheap judge is unavailable, default to SKIP for non-addressed
     // traffic: failing open would send every group message through the full agent.
     if (!careLlm || careLlm.isMock) return { reply: false, reason: 'judge_unavailable' };
-    try {
-      const hist = groupHistory.load(chatId, 120) || [];
+    const build = (limit, cap) => {
+      const hist = groupHistory.load(chatId, limit) || [];
       let transcript = hist
-        .map((m) => (m.role === 'assistant' ? '鲸鲸' : (m.name || '群友')) + '：' + String(m.text || '').replace(/\s+/g, ' ').slice(0, 300))
+        .map((m) => (m.role === 'assistant' ? '鲸鲸' : (m.name || '群友')) + '：' + String(m.text || '').replace(/\s+/g, ' ').slice(0, 260))
         .join('\n') || (senderName || '群友') + '：' + String(text || '').slice(0, 300);
-      if (transcript.length > 24000) transcript = transcript.slice(-24000);
-      const system = '你是群聊里的鲸鲸的接话判断器。根据完整群聊上下文判断：鲸鲸现在该不该接这句话。'
-        + '被点名、被引用、有人直接问她、向她求助或情绪明显需要回应 → REPLY。'
-        + '普通群聊、别人互聊、刷屏、无意义重复、她插不上话 → SKIP。'
-        + '只输出 REPLY 或 SKIP，不要解释，不要加标点。';
+      if (transcript.length > cap) transcript = transcript.slice(-cap);
+      return transcript;
+    };
+    const system = '你是群聊里的鲸鲸的接话判断器。根据群聊上下文判断：鲸鲸现在该不该接这句话。'
+      + '被点名、被引用、有人直接问她、向她求助或情绪明显需要回应 → REPLY。'
+      + '普通群聊、别人互聊、刷屏、无意义重复、她插不上话 → SKIP。'
+      + '只输出 REPLY 或 SKIP，不要解释，不要加标点。';
+    const tryOnce = async (limit, cap) => {
       const out = await careLlm.complete({
         system,
-        turns: [{ role: 'user', content: '【群聊上下文】\n' + transcript + '\n\n【最新一句】\n' + (senderName || '群友') + '：' + String(text || '').slice(0, 1000) }],
+        turns: [{ role: 'user', content: '【群聊上下文】\n' + build(limit, cap) + '\n\n【最新一句】\n' + (senderName || '群友') + '：' + String(text || '').slice(0, 1000) }],
         maxTokens: 256,
         skipGovernor: true,
       });
       const raw = String(out || '').trim().toUpperCase();
-      const reply = raw.includes('REPLY');
-      log({ kind: 'group-judge', chatId, reply, raw: raw.slice(0, 20) });
-      return reply ? { reply: true, reason: 'judge_reply' } : { reply: false, reason: 'judge_skip' };
-    } catch (e) {
-      log({ kind: 'group-judge-fail', chatId, error: String(e && e.message).slice(0, 120) });
-      return { reply: false, reason: 'judge_fail' };
+      return { reply: raw.includes('REPLY'), raw: raw.slice(0, 20) };
+    };
+    try {
+      const first = await tryOnce(60, 16000);
+      log({ kind: 'group-judge', chatId, reply: first.reply, raw: first.raw });
+      return first.reply ? { reply: true, reason: 'judge_reply' } : { reply: false, reason: 'judge_skip' };
+    } catch (firstError) {
+      try {
+        const second = await tryOnce(20, 6000);
+        log({ kind: 'group-judge-retry', chatId, reply: second.reply, raw: second.raw });
+        return second.reply ? { reply: true, reason: 'judge_reply' } : { reply: false, reason: 'judge_skip' };
+      } catch (e) {
+        log({ kind: 'group-judge-fail', chatId, error: String(e && e.message).slice(0, 120) });
+        return { reply: false, reason: 'judge_fail' };
+      }
     }
   }
 
