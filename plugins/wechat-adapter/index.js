@@ -948,7 +948,7 @@ let lastMasterInboundAt = 0;
 
   // 群 → 独立 session 的映射（第一次见到这个群就建一个，之后一直用它）
   const chatSessionsFile = String(cfg.chatSessionsFile || 'D:/dsh-workspace/chat/whale_gril/data/chat-sessions.json');
-  async function ensureChatSession(token, g, chatId, fallback) {
+  async function ensureChatSession(token, g, chatId, fallback, title) {
     const key = String(chatId || '');
     if (!key) return fallback;
     let store = { byChat: {} };
@@ -963,10 +963,14 @@ let lastMasterInboundAt = 0;
       const out = await boot.call('session/create', { request: { cwd: cfg.workspace } });
       const sid = String((out && out.sessionId) || '');
       if (!sid) return fallback;
+      const label = String(title || '').trim().slice(0, 60);
+      if (label) {
+        try { await boot.call('session/rename', { request: { sessionId: sid, title: label } }); } catch { /* title is best-effort */ }
+      }
       byChat[key] = sid;
       try { fs.mkdirSync(String(chatSessionsFile).replace(/[\\/][^\\/]+$/, ''), { recursive: true }); } catch { /* ignore */ }
       try { fs.writeFileSync(chatSessionsFile, JSON.stringify({ byChat }, null, 1), 'utf8'); } catch { /* ignore */ }
-      log({ kind: 'chat-session', chatId: key, sessionId: sid });
+      log({ kind: 'chat-session', chatId: key, sessionId: sid, title: label || undefined });
       return sid;
     } catch (e) {
       log({ kind: 'chat-session-fail', chatId: key, error: String(e && e.message).slice(0, 120) });
@@ -1057,7 +1061,9 @@ let lastMasterInboundAt = 0;
     // 群聊按 chatId 分到独立 session；别人的私聊也各开一个，只有主人的私聊沿用当前会话。
     let effectiveSession = targetSessionId;
     if (chatType === 'group' || (chatType === 'private' && !isMaster)) {
-      effectiveSession = await ensureChatSession(token, g, chatId || sender, targetSessionId);
+      const titleBase = String(payload.chat_title || payload.chatTitle || payload.sender_name || payload.senderName || chatId || sender || '').trim();
+      const title = titleBase && chatType === 'group' && !titleBase.endsWith('群') ? titleBase + ' 群' : titleBase;
+      effectiveSession = await ensureChatSession(token, g, chatId || sender, targetSessionId, title);
     }
     bg = { ...g, sessionId: effectiveSession };
     const broker = getGuiBroker(token, bg);
