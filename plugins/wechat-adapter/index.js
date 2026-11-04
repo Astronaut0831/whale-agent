@@ -908,6 +908,7 @@ let lastMasterInboundAt = 0;
   let groupTopicBusy = false;
   const groupTopicTimer = setInterval(async () => {
     if (groupTopicBusy || !groupProactiveArmed || !proactive || !careLlm || careLlm.isMock) return;
+    if (!((((visionConfig || {}).proactive || {}).group || {}).enabled)) return;
     if (!readOnline()) return;
     groupTopicBusy = true;
     try {
@@ -950,19 +951,19 @@ let lastMasterInboundAt = 0;
   const chatSessionsFile = String(cfg.chatSessionsFile || 'D:/dsh-workspace/chat/whale_gril/data/chat-sessions.json');
   async function ensureChatSession(token, g, chatId, fallback, title) {
     const key = String(chatId || '');
-    if (!key) return fallback;
+    if (!key) return { sid: fallback, created: false };
     let store = { byChat: {} };
     try {
       const raw = JSON.parse(fs.readFileSync(chatSessionsFile, 'utf8')) || {};
       store = raw && raw.byChat && typeof raw.byChat === 'object' ? { byChat: raw.byChat } : { byChat: raw && typeof raw === 'object' ? raw : {} };
     } catch { store = { byChat: {} }; }
     const byChat = store.byChat || {};
-    if (byChat[key]) return String(byChat[key]);
+    if (byChat[key]) return { sid: String(byChat[key]), created: false };
     try {
       const boot = getGuiBroker(token, { ...g, sessionId: fallback || String(g.sessionId || '') || 'bootstrap' });
       const out = await boot.call('session/create', { request: { cwd: cfg.workspace } });
       const sid = String((out && out.sessionId) || '');
-      if (!sid) return fallback;
+      if (!sid) return { sid: fallback, created: false };
       const label = String(title || '').trim().slice(0, 60);
       if (label) {
         try { await boot.call('session/rename', { request: { sessionId: sid, title: label } }); } catch { /* title is best-effort */ }
@@ -971,10 +972,10 @@ let lastMasterInboundAt = 0;
       try { fs.mkdirSync(String(chatSessionsFile).replace(/[\\/][^\\/]+$/, ''), { recursive: true }); } catch { /* ignore */ }
       try { fs.writeFileSync(chatSessionsFile, JSON.stringify({ byChat }, null, 1), 'utf8'); } catch { /* ignore */ }
       log({ kind: 'chat-session', chatId: key, sessionId: sid, title: label || undefined });
-      return sid;
+      return { sid, created: true };
     } catch (e) {
       log({ kind: 'chat-session-fail', chatId: key, error: String(e && e.message).slice(0, 120) });
-      return fallback;
+      return { sid: fallback, created: false };
     }
   }
 
@@ -1015,6 +1016,7 @@ let lastMasterInboundAt = 0;
     const targetSessionId = String(payload.targetSessionId || payload.sessionId || g.sessionId || runtimeTarget || '');
     if (!targetSessionId || !g.url) throw new Error('gui broker config incomplete');
     let bg = null;
+    let sessionWasCreated = false;
 
     if (chatType === 'group') {
       if (!routes.includes('groups') && !routes.includes('all')) return null;
@@ -1025,9 +1027,9 @@ let lastMasterInboundAt = 0;
         replyToBot: Boolean(payload.reply_to_bot ?? payload.replyToBot),
         ts: Number(payload.timestamp || payload.ts) || Date.now(),
       };
+      // Full autonomy: every whitelisted group message reaches the agent.
+      // The agent itself decides whether to answer; no score/cooldown gate.
       try { groupPolicy.observe(msgLike); } catch { /* ignore */ }
-      const wake = await groupPolicy.shouldWake(msgLike);
-      if (!wake || !wake.wake) return { ok: true, ignored: true, reason: wake && wake.reason };
     } else if (chatType === 'private') {
       const allowed = isMaster
         ? (routes.includes('master') || routes.includes('all-private') || routes.includes('all') || routes.length === 0)
@@ -1063,7 +1065,9 @@ let lastMasterInboundAt = 0;
     if (chatType === 'group' || (chatType === 'private' && !isMaster)) {
       const titleBase = String(payload.chat_title || payload.chatTitle || payload.sender_name || payload.senderName || chatId || sender || '').trim();
       const title = titleBase && chatType === 'group' && !titleBase.endsWith('群') ? titleBase + ' 群' : titleBase;
-      effectiveSession = await ensureChatSession(token, g, chatId || sender, targetSessionId, title);
+      const ensured = await ensureChatSession(token, g, chatId || sender, targetSessionId, title);
+      effectiveSession = ensured.sid;
+      sessionWasCreated = ensured.created;
     }
     bg = { ...g, sessionId: effectiveSession };
     const broker = getGuiBroker(token, bg);
@@ -1075,13 +1079,26 @@ let lastMasterInboundAt = 0;
       ? '[群聊 ' + chatId + ']'
       : '[私聊 ' + (sender || chatId) + ']';
     const _who = String(payload.sender_name || payload.senderName || (chatType === 'group' ? '群友' : sender) || '对方');
-    const promptText = _src + ' ' + _hms + ' ' + _who + '：' + text;
+    let promptText = _src + ' ' + _hms + ' ' + _who + '：' + text;
+    if (chatType === 'group' && sessionWasCreated) {
+      try {
+        const hist = groupHistory.load(chatId, 20) || [];
+        const lines = hist.filter((m) => m.role === 'user' && m.text).slice(-10)
+          .map((m) => String(m.name || '群友') + '：' + String(m.text).replace(/\s+/g, ' ').slice(0, 160));
+        if (lines.length) promptText = '【最近群聊】\n' + lines.join('\n') + '\n\n' + promptText;
+      } catch { /* history is best effort */ }
+    }
     const out = await withLease('gui-broker:' + effectiveSession, () => broker.prompt(promptText, images), {
       dir: cfg.dataDir,
       owner: 'adapter-' + process.pid,
       ttlMs: Number(g.leaseTtlMs) || 120000,
       waitMs: Number(g.leaseWaitMs) || 30000,
     });
+    const rawOut = String(out.text || '').trim();
+    if (chatType === 'group' && (rawOut === '[SKIP]' || rawOut === 'SKIP')) {
+      log({ kind: 'group-model-skip', sessionId: effectiveSession, chatId, traceId: out.traceId, turn: out.turn });
+      return { ok: true, ignored: true, reason: 'model_skip' };
+    }
     const bubbles = splitBubbles(out.text);
     if (deliver) await sendBubbles({ chatId, chatType, bubbles });
     if (chatType === 'group') {

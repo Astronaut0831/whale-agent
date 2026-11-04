@@ -59,20 +59,21 @@ const groupPayload = {
   sender_id: 'u1', nickname: '甲', text: '随便聊聊',
 };
 
-test('群聊低分时忽略，但仍记录历史', async () => {
+test('群聊全量进 agent，模型可用 [SKIP] 自主不回', async () => {
   const observed = [];
   let ran = false;
   const out = await dispatchInbound(groupPayload, {
     mode: 'active', masterWxid: 'wxid_master', groupEnabled: true, legacyEnabled: false,
     groupObserve: (m) => observed.push(m.msgId),
     groupShouldWake: async () => ({ wake: false, reason: 'score_low', score: 0.2 }),
-    runTurn: async () => { ran = true; return { text: '不该回' }; },
+    runTurn: async () => { ran = true; return { text: '[SKIP]' }; },
     log: () => {},
   });
   assert.equal(out.status, 200);
   assert.equal(out.data.ignored, true);
+  assert.equal(out.data.reason, 'model_skip');
   assert.deepEqual(observed, ['gm1']);
-  assert.equal(ran, false);
+  assert.equal(ran, true);
 });
 
 test('群聊高分时进 DSH 并记录她的回复', async () => {

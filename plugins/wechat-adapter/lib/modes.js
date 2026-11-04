@@ -21,16 +21,18 @@ export async function dispatchInbound(payload, deps = {}) {
 
   if (deps.groupEnabled && deps.mode === 'active' && msg.chatType === 'group') {
     try { deps.groupObserve?.(msg); deps.groupCollect?.(msg); } catch { /* ignore */ }
-    let decision = null;
-    try { decision = await deps.groupShouldWake?.({ msg }); } catch { decision = null; }
-    if (!decision || !decision.wake) {
-      const reason = (decision && decision.reason) || 'group_skip';
-      deps.log?.({ kind: 'group-skip', msgId: msg.msgId, reason, score: decision && decision.score, ms: Date.now() - t0 });
-      return { mode: 'group-skip', status: 200, data: { ok: true, ignored: true, reason }, ok: true };
-    }
+    // Full autonomy: every whitelisted group message reaches the agent. The
+    // agent decides whether to answer (and may return [SKIP]); no score/cooldown
+    // wake gate here.
+    const decision = { reason: 'autonomous', score: null };
     try {
       const out = await deps.runTurn({ sessionKey: msg.sessionKey, message: formatUserMessage(msg), rawText: msg.text });
-      const bubbles = deps.splitBubbles(String(out.text || ''));
+      const rawOut = String(out.text || '').trim();
+      if (rawOut === '[SKIP]' || rawOut === 'SKIP') {
+        deps.log?.({ kind: 'group-model-skip', msgId: msg.msgId, ms: Date.now() - t0 });
+        return { mode: 'group-skip', status: 200, data: { ok: true, ignored: true, reason: 'model_skip' }, ok: true };
+      }
+      const bubbles = deps.splitBubbles(rawOut);
       if (!bubbles.length) throw new Error('empty reply');
       const outbound = createOutbound(msg.envelope, { bubbles });
       await deps.sendBubbles({ chatId: msg.chatId, chatType: msg.chatType, bubbles, outbound });
