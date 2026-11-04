@@ -2,7 +2,7 @@
 
 import { fromWechat } from './envelope.js';
 
-const PLATFORM = 'wechat';
+const DEFAULT_PLATFORM = 'wechat';
 
 function pick(obj, keys) {
   for (const k of keys) {
@@ -12,8 +12,9 @@ function pick(obj, keys) {
 }
 
 export function normalizeInbound(payload = {}) {
+  const platform = String(pick(payload, ['platform', 'source']) ?? DEFAULT_PLATFORM).toLowerCase() || DEFAULT_PLATFORM;
   const chatId = String(pick(payload, ['chat_id', 'chatId', 'room_id', 'roomId', 'conversation_id']) ?? '');
-  if (!chatId) throw new Error('wechat inbound: missing chat_id');
+  if (!chatId) throw new Error(platform + ' inbound: missing chat_id');
 
   const chatType = (() => {
     const t = String(pick(payload, ['chat_type', 'chatType']) ?? '').toLowerCase();
@@ -23,7 +24,7 @@ export function normalizeInbound(payload = {}) {
   })();
 
   const msgId = String(pick(payload, ['msg_id', 'msgId', 'message_id', 'id']) ?? '');
-  if (!msgId) throw new Error('wechat inbound: missing msg_id');
+  if (!msgId) throw new Error(platform + ' inbound: missing msg_id');
 
   const text = String(pick(payload, ['text', 'content', 'message']) ?? '');
   const images = [];
@@ -34,8 +35,8 @@ export function normalizeInbound(payload = {}) {
   const ts = Number.isFinite(tsRaw) ? (tsRaw < 1e12 ? Math.round(tsRaw * 1000) : Math.round(tsRaw)) : Date.now();
 
   const msg = {
-    platform: PLATFORM,
-    sessionKey: `${PLATFORM}:${chatType === 'group' ? 'g' : 'u'}:${chatId}`,
+    platform,
+    sessionKey: `${platform}:${chatType === 'group' ? 'g' : 'u'}:${chatId}`,
     chatId,
     chatType,
     msgId,

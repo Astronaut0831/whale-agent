@@ -35,7 +35,7 @@ export async function dispatchInbound(payload, deps = {}) {
       const bubbles = deps.splitBubbles(rawOut);
       if (!bubbles.length) throw new Error('empty reply');
       const outbound = createOutbound(msg.envelope, { bubbles });
-      await deps.sendBubbles({ chatId: msg.chatId, chatType: msg.chatType, bubbles, outbound });
+      await deps.sendBubbles({ platform: msg.platform, chatId: msg.chatId, chatType: msg.chatType, bubbles, outbound });
       try { deps.groupRecordReply?.(msg); deps.groupObserveReply?.(msg, out.text); } catch { /* ignore */ }
       deps.log?.({ kind: 'active-group', msgId: msg.msgId, reason: decision.reason, score: decision.score, text: out.text, bubbles, ms: Date.now() - t0 });
       return { mode: 'active-group', status: 200, data: { ok: true, bubbles, reason: decision.reason, score: decision.score }, ok: true };
@@ -75,7 +75,7 @@ export async function dispatchInbound(payload, deps = {}) {
     const bubbles = deps.splitBubbles(String(out.text || ''));
     if (!bubbles.length) throw new Error('empty reply');
     const outbound = createOutbound(msg.envelope, { bubbles });
-    await deps.sendBubbles({ chatId: msg.chatId, chatType: msg.chatType, bubbles, outbound });
+    await deps.sendBubbles({ platform: msg.platform, chatId: msg.chatId, chatType: msg.chatType, bubbles, outbound });
     deps.log?.({ kind: 'active', msgId: msg.msgId, sessionKey: msg.sessionKey, text: out.text, bubbles, outbound, ms: Date.now() - t0 });
     return { mode, status: 200, data: { ok: true, bubbles, outbound }, ok: true };
   } catch (e) {

@@ -333,9 +333,9 @@ export function apply(ctx, config = {}) {
   }
 
   setOutboxFile(cfg.outboxFile);
-  const sendBubbles = async ({ chatId, chatType, bubbles }) => {
+  const sendBubbles = async ({ platform = 'wechat', chatId, chatType, bubbles }) => {
     for (const text of bubbles || []) {
-      enqueue({ chatId, chatType: chatType || 'private', kind: 'text', text: String(text || '') });
+      enqueue({ platform, chatId, chatType: chatType || 'private', kind: 'text', text: String(text || '') });
     }
   };
 
@@ -1468,7 +1468,8 @@ let lastMasterInboundAt = 0;
     }
 
     if (req.method === 'GET' && url.pathname === '/api/bridge/outbox') {
-      return sendJson(res, 200, { ok: true, items: take(10) });
+      const platform = String(url.searchParams.get('platform') || 'wechat');
+      return sendJson(res, 200, { ok: true, items: take(10, platform) });
     }
 
     if (req.method === 'POST' && url.pathname === '/api/bridge/outbox/ack') {
@@ -1810,64 +1811,70 @@ let lastMasterInboundAt = 0;
     if (req.method === 'GET' && url.pathname === '/wechat/ping') {
       return sendJson(res, 200, pingPayload());
     }
-    if (req.method === 'POST' && url.pathname === '/webhook/wechat') {
+    if (req.method === 'POST' && (url.pathname === '/webhook/wechat' || url.pathname === '/webhook/qq')) {
+      const platform = url.pathname === '/webhook/qq' ? 'qq' : 'wechat';
       if (!checkToken({ headers: req.headers, url: req.url }, token)) {
         return sendJson(res, 401, { ok: false, error: 'bad token' });
       }
       let payload;
       try { payload = JSON.parse(await readBody(req, cfg.maxBodyBytes)); }
       catch { return sendJson(res, 400, { ok: false, error: 'bad json' }); }
+      payload.platform = platform;
 
       const msgId = String(payload.msg_id || payload.msgId || '');
       if (msgId && seen.has(msgId)) return sendJson(res, 200, { ok: true, duplicate: true });
       if (msgId) seen.add(msgId);
 
-      const onlineCmd = await handleOnlineControl(payload);
+      const onlineCmd = platform === 'wechat' ? await handleOnlineControl(payload) : null;
       if (onlineCmd) return sendJson(res, 200, onlineCmd);
       try {
         const _cid = String(payload.chat_id || payload.chatId || payload.from || '');
-        if (_cid && masterWxid && _cid === String(masterWxid)) lastMasterInboundAt = Date.now();
+        if (platform === 'wechat' && _cid && masterWxid && _cid === String(masterWxid)) lastMasterInboundAt = Date.now();
       } catch { /* ignore */ }
       if (!readOnline()) return sendJson(res, 200, { ok: true, ignored: true, reason: 'offline' });
 
-      collectSticker(payload).catch(() => {});
+      if (platform === 'wechat') {
+        collectSticker(payload).catch(() => {});
 
-      const miscCmd = await handleMiscCommand(payload);
-      if (miscCmd) {
-        log({ kind: 'admin-command', text: String(payload.text || '').slice(0, 80), bubbles: miscCmd.bubbles });
-        return sendJson(res, 200, miscCmd);
-      }
+        const miscCmd = await handleMiscCommand(payload);
+        if (miscCmd) {
+          log({ kind: 'admin-command', text: String(payload.text || '').slice(0, 80), bubbles: miscCmd.bubbles });
+          return sendJson(res, 200, miscCmd);
+        }
 
-      const taskCmd = await handleTaskCommand(payload);
-      if (taskCmd) {
-        log({ kind: 'task-command', text: String(payload.text || '').slice(0, 80), bubbles: taskCmd.bubbles });
-        return sendJson(res, 200, taskCmd);
-      }
+        const taskCmd = await handleTaskCommand(payload);
+        if (taskCmd) {
+          log({ kind: 'task-command', text: String(payload.text || '').slice(0, 80), bubbles: taskCmd.bubbles });
+          return sendJson(res, 200, taskCmd);
+        }
 
-      const reminderCmd = await handleReminderIntent(payload);
-      if (reminderCmd) {
-        log({ kind: 'reminder', text: String(payload.text || '').slice(0, 80), bubbles: reminderCmd.bubbles });
-        return sendJson(res, 200, reminderCmd);
+        const reminderCmd = await handleReminderIntent(payload);
+        if (reminderCmd) {
+          log({ kind: 'reminder', text: String(payload.text || '').slice(0, 80), bubbles: reminderCmd.bubbles });
+          return sendJson(res, 200, reminderCmd);
+        }
       }
 
       const cmdChatId = String(payload.chat_id || payload.chatId || '');
-      if (cmdChatId && groupPolicy.isMuted(cmdChatId)) {
+      if (platform === 'wechat' && cmdChatId && groupPolicy.isMuted(cmdChatId)) {
         return sendJson(res, 200, { ok: true, ignored: true, reason: 'muted' });
       }
 
-      try {
-        const brokerOut = await handleGuiBroker(payload);
-        if (brokerOut) return sendJson(res, 200, brokerOut);
-      } catch (e) {
-        log({ kind: 'gui-broker-fail', error: String(e && e.message).slice(0, 200) });
-        // A configured GUI broker must fail closed. Falling through to headless
-        // would silently move master private chat into wechat:u:<master> and
-        // split the GUI/WeChat memory scope.
-        const brokerCfg = cfg.guiBroker || {};
-        const sender = String(payload.sender_id || payload.senderId || '');
-        const privateChat = String(payload.chat_type || payload.chatType || 'private') !== 'group';
-        if (brokerCfg.enabled === true && privateChat && sender === masterWxid) {
-          return sendJson(res, 503, { ok: false, error: 'gui broker unavailable; message not routed' });
+      if (platform === 'wechat') {
+        try {
+          const brokerOut = await handleGuiBroker(payload);
+          if (brokerOut) return sendJson(res, 200, brokerOut);
+        } catch (e) {
+          log({ kind: 'gui-broker-fail', error: String(e && e.message).slice(0, 200) });
+          // A configured GUI broker must fail closed. Falling through to headless
+          // would silently move master private chat into wechat:u:<master> and
+          // split the GUI/WeChat memory scope.
+          const brokerCfg = cfg.guiBroker || {};
+          const sender = String(payload.sender_id || payload.senderId || '');
+          const privateChat = String(payload.chat_type || payload.chatType || 'private') !== 'group';
+          if (brokerCfg.enabled === true && privateChat && sender === masterWxid) {
+            return sendJson(res, 503, { ok: false, error: 'gui broker unavailable; message not routed' });
+          }
         }
       }
 
@@ -1882,11 +1889,11 @@ let lastMasterInboundAt = 0;
           });
         };
         const out = await dispatchInbound(payload, {
-          mode: readMode(cfg.modeFile),
+          mode: platform === 'qq' ? 'active' : readMode(cfg.modeFile),
           masterWxid,
           legacyBase: cfg.legacyBase,
-          legacyEnabled: cfg.legacyEnabled !== false,
-          groupEnabled: cfg.groupEnabled === true,
+          legacyEnabled: platform === 'qq' ? false : cfg.legacyEnabled !== false,
+          groupEnabled: platform === 'qq' ? true : cfg.groupEnabled === true,
           groupShouldWake: ({ msg }) => groupPolicy.shouldWake(msg),
           groupObserve: (msg) => groupPolicy.observe(msg),
           groupCollect: (msg) => groupCollect(msg),

@@ -58,7 +58,7 @@ export function createEnvelope({
 
 export function fromWechat(msg) {
   return createEnvelope({
-    platform: 'wechat',
+    platform: msg.platform || 'wechat',
     chatId: msg.chatId,
     chatType: msg.chatType,
     msgId: msg.msgId,

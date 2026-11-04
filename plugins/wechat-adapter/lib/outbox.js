@@ -29,11 +29,11 @@ function save(d) {
   } catch { /* keep bridge alive even if disk is temporarily unavailable */ }
 }
 
-export function enqueue({ chatId, chatType = 'group', kind = 'text', text = '', file = '', meta = {} } = {}) {
+export function enqueue({ platform = 'wechat', chatId, chatType = 'group', kind = 'text', text = '', file = '', meta = {} } = {}) {
   const id = 'o_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 6);
   const d = load();
   d.items.push({
-    id, chatId: String(chatId || ''), chatType, kind, text: String(text || ''),
+    id, platform: String(platform || 'wechat'), chatId: String(chatId || ''), chatType, kind, text: String(text || ''),
     file: String(file || ''), meta, createdAt: Date.now(), status: 'pending', attempts: 0,
   });
   if (d.items.length > MAX_ITEMS) d.items = d.items.slice(-MAX_ITEMS);
@@ -41,12 +41,13 @@ export function enqueue({ chatId, chatType = 'group', kind = 'text', text = '', 
   return id;
 }
 
-export function take(limit = 10) {
+export function take(limit = 10, platform = 'wechat') {
   const d = load();
   const now = Date.now();
   const out = [];
   for (const it of d.items) {
     if (out.length >= limit) break;
+    if (String(it.platform || 'wechat') !== String(platform || 'wechat')) continue;
     if (it.status === 'pending' || (it.status === 'sending' && now - Number(it.takenAt || 0) > 60000)) {
       it.status = 'sending';
       it.takenAt = now;
