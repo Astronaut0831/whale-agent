@@ -15,6 +15,7 @@ import { runTurn, createStore } from './lib/sessions.js';
 import { splitBubbles } from './lib/bubbles.js';
 import { runHeadlessTurn } from './lib/headless.js';
 import { createGuiBroker, extractTokenFromLog } from './lib/gui-broker.js';
+import { createGuiInputStore } from './lib/gui-input-store.js';
 import { withLease } from './lib/session-lease.js';
 import { readRuntime, repoRoot } from '../lib/runtime.js';
 import { prefsBlock, selfnoteBlock } from '../lib/context-data.js';
@@ -938,10 +939,11 @@ let lastMasterInboundAt = 0;
 
   const guiBrokerCache = new Map();
   const guiInputCache = new Map();
-  const guiInputJobs = new Map();
   const guiInputInflight = new Set();
   const GUI_INPUT_TTL_MS = 10 * 60 * 1000;
   const GUI_INPUT_MAX = 200;
+  const guiInputJobs = createGuiInputStore(String(cfg.guiInputJobsFile || path.join(cfg.dataDir, 'gui-input-jobs.json')), { max: GUI_INPUT_MAX });
+  guiInputJobs.load();
 
   // 群 → 独立 session 的映射（第一次见到这个群就建一个，之后一直用它）
   const chatSessionsFile = String(cfg.chatSessionsFile || 'D:/dsh-workspace/chat/whale_gril/data/chat-sessions.json');
@@ -1127,6 +1129,67 @@ let lastMasterInboundAt = 0;
     }
   }, 5000) : null;
   if (taskTimer && taskTimer.unref) taskTimer.unref();
+
+  async function runGuiInput(text, targetSessionId) {
+    const out = await handleGuiBroker({
+      chat_id: 'gui',
+      chat_type: 'private',
+      sender_id: masterWxid,
+      targetSessionId,
+      text,
+    }, { deliver: false });
+    if (!out) throw new Error('broker route rejected');
+    return {
+      ok: true,
+      text: out.text,
+      targetSessionId,
+      traceId: out.traceId,
+      turn: out.turn,
+      seq: out.seq,
+    };
+  }
+
+  function rememberGuiInput(key, value) {
+    if (!key) return;
+    guiInputCache.set(key, { at: Date.now(), value });
+    while (guiInputCache.size > GUI_INPUT_MAX) {
+      const oldest = guiInputCache.keys().next().value;
+      if (oldest === undefined) break;
+      guiInputCache.delete(oldest);
+    }
+  }
+
+  function startGuiInputJob(key, targetSessionId, text) {
+    if (guiInputInflight.has(key)) return;
+    guiInputInflight.add(key);
+    const prev = guiInputJobs.get(key) || {};
+    guiInputJobs.set(key, { ...prev, at: Date.now(), status: 'queued', requestId: key, targetSessionId, text });
+    Promise.resolve()
+      .then(async () => {
+        guiInputJobs.set(key, { ...(guiInputJobs.get(key) || {}), at: Date.now(), status: 'running' });
+        const value = await runGuiInput(text, targetSessionId);
+        rememberGuiInput(key, value);
+        guiInputJobs.set(key, { ...(guiInputJobs.get(key) || {}), at: Date.now(), status: 'done', value });
+        log({ kind: 'gui-input-async', requestId: key, targetSessionId, traceId: value.traceId, turn: value.turn, seq: value.seq });
+      })
+      .catch((e) => {
+        guiInputJobs.set(key, { ...(guiInputJobs.get(key) || {}), at: Date.now(), status: 'error', error: String(e && e.message) });
+        log({ kind: 'gui-input-async-fail', requestId: key, targetSessionId, error: String(e && e.message).slice(0, 200) });
+      })
+      .finally(() => guiInputInflight.delete(key));
+  }
+
+  function resumeGuiInputJobs() {
+    for (const [key, job] of guiInputJobs.entries()) {
+      if (!job || (job.status !== 'queued' && job.status !== 'running')) continue;
+      if (!job.text || !job.targetSessionId) {
+        guiInputJobs.set(key, { ...job, at: Date.now(), status: 'error', error: 'persisted job missing text/target' });
+        continue;
+      }
+      startGuiInputJob(key, job.targetSessionId, job.text);
+    }
+  }
+
 
   const groupCollect = (msg) => {
     if (!msg.text || String(msg.text).startsWith('/')) return;
@@ -1494,62 +1557,19 @@ let lastMasterInboundAt = 0;
         if (cached && Date.now() - cached.at < GUI_INPUT_TTL_MS) {
           return sendJson(res, 200, { ...cached.value, duplicate: true });
         }
-        guiInputInflight.add(requestKey);
+        if (!asyncRequested) guiInputInflight.add(requestKey);
       }
 
-      const runOnce = async () => {
-        const out = await handleGuiBroker({
-          chat_id: 'gui',
-          chat_type: 'private',
-          sender_id: masterWxid,
-          targetSessionId,
-          text,
-        }, { deliver: false });
-        if (!out) throw new Error('broker route rejected');
-        return {
-          ok: true,
-          text: out.text,
-          targetSessionId,
-          idempotencyKey: requestKey || undefined,
-          traceId: out.traceId,
-          turn: out.turn,
-          seq: out.seq,
-        };
-      };
-      const remember = (key, value) => {
-        if (!key) return;
-        guiInputCache.set(key, { at: Date.now(), value });
-        if (guiInputCache.size > GUI_INPUT_MAX) {
-          const oldest = guiInputCache.keys().next().value;
-          if (oldest !== undefined) guiInputCache.delete(oldest);
-        }
-      };
-
       if (asyncRequested) {
-        if (guiInputJobs.size > GUI_INPUT_MAX) {
-          const oldestJob = guiInputJobs.keys().next().value;
-          if (oldestJob !== undefined) guiInputJobs.delete(oldestJob);
-        }
-        guiInputJobs.set(requestKey, { at: Date.now(), status: 'queued', requestId: requestKey, targetSessionId });
-        Promise.resolve()
-          .then(async () => {
-            guiInputJobs.set(requestKey, { at: Date.now(), status: 'running', requestId: requestKey, targetSessionId });
-            const value = await runOnce();
-            remember(requestKey, value);
-            guiInputJobs.set(requestKey, { at: Date.now(), status: 'done', requestId: requestKey, targetSessionId, value });
-            log({ kind: 'gui-input-async', requestId: requestKey, targetSessionId, traceId: value.traceId, turn: value.turn, seq: value.seq });
-          })
-          .catch((e) => {
-            guiInputJobs.set(requestKey, { at: Date.now(), status: 'error', requestId: requestKey, targetSessionId, error: String(e && e.message) });
-            log({ kind: 'gui-input-async-fail', requestId: requestKey, targetSessionId, error: String(e && e.message).slice(0, 200) });
-          })
-          .finally(() => guiInputInflight.delete(requestKey));
+        guiInputJobs.set(requestKey, { at: Date.now(), status: 'queued', requestId: requestKey, targetSessionId, text });
+        startGuiInputJob(requestKey, targetSessionId, text);
         return sendJson(res, 202, { ok: true, accepted: true, requestId: requestKey, targetSessionId });
       }
 
       try {
-        const value = await runOnce();
-        remember(requestKey, value);
+        const value = await runGuiInput(text, targetSessionId);
+        value.idempotencyKey = requestKey || undefined;
+        rememberGuiInput(requestKey, value);
         log({ kind: 'gui-input', targetSessionId, traceId: value.traceId, turn: value.turn, seq: value.seq, idempotencyKey: requestKey || undefined });
         return sendJson(res, 200, value);
       } catch (e) {
@@ -1757,6 +1777,8 @@ let lastMasterInboundAt = 0;
   });
 
   server.listen(cfg.port, cfg.host);
+  const resumeTimer = setTimeout(() => resumeGuiInputJobs(), 1500);
+  if (resumeTimer.unref) resumeTimer.unref();
   if (typeof ctx.effect === 'function') {
     ctx.effect(() => () => server.close());
   } else if (typeof ctx.on === 'function') {
