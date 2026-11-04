@@ -85,6 +85,7 @@ const DEFAULTS = {
     url: 'http://127.0.0.1:3080',
     token: '',
     tokenFile: path.join(repoRoot, 'data', 'gui-3080.log'),
+    routes: ['master', 'groups'],
     sessionId: '',
     timeoutMs: 120000,
   },

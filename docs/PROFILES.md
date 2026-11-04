@@ -66,6 +66,7 @@ powershell -File tools\set-runtime.ps1 -SessionId "<SESSION_ID>" -MemoryToken "<
           guiInput: true
           url: "http://127.0.0.1:3080"
           tokenFile: "<REPO>/data/gui-3080.log"
+          routes: ["master", "groups"]
           sessionId: "<SESSION_ID>"
           timeoutMs: 120000
 ```
