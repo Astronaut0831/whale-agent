@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Run only the new DSH memory/adapter stack tests; legacy tests are separate.
+// Run the maintained DSH stack and test-runner regressions, not legacy tests.
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -9,13 +9,16 @@ const roots = [
   'plugins/whale-memory-tools/test',
   'plugins/whale-memory-core/test',
   'plugins/whale-system-context/test',
+  'plugins/whale-sticker-tool/test',
   'plugins/lib',
+  'tools',
+  'scripts',
 ];
 const files = [];
 for (const dir of roots) {
   if (!fs.existsSync(dir)) continue;
   for (const name of fs.readdirSync(dir)) {
-    if (name.endsWith('.test.js')) files.push(path.join(dir, name));
+    if (/\.test\.(?:js|mjs)$/.test(name)) files.push(path.join(dir, name));
   }
 }
 if (!files.length) {
