@@ -206,6 +206,18 @@ const server = http.createServer(async (req, res) => {
         snowlumaUrl: SNOWLUMA_URL,
       });
     }
+    if (url.pathname === '/api/online' && req.method === 'GET') {
+      return sendJson(res, 200, await adapterFetch('/api/platforms/online'));
+    }
+    if (url.pathname === '/api/online' && req.method === 'PUT') {
+      const raw = await readBody(req);
+      let body;
+      try { body = JSON.parse(raw || '{}'); } catch { return sendJson(res, 400, { ok: false, error: 'bad json' }); }
+      return sendJson(res, 200, await adapterFetch('/api/platforms/online', {
+        method: 'PUT',
+        body: JSON.stringify(body),
+      }));
+    }
     if (url.pathname === '/api/access' && req.method === 'GET') {
       const platform = String(url.searchParams.get('platform') || '');
       const suffix = platform ? '?platform=' + encodeURIComponent(platform) : '';

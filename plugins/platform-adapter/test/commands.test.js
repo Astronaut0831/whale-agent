@@ -175,27 +175,20 @@ test('/sendfile 与 /run 已移除', async () => {
   }
 });
 
-test('/offline 关闭入站，/online 恢复', async () => {
+test('/offline 和 /online 已迁移到控制台', async () => {
   const { dir, server, base } = await setup();
   try {
     const off = await cmd(base, {
       chat_id: 'wxid_master', chat_type: 'private', msg_id: 'c14',
       sender_id: 'wxid_master', text: '/offline',
     });
-    assert.match(off.data.bubbles[0], /下线/);
-
-    const skipped = await cmd(base, {
-      chat_id: 'wxid_master', chat_type: 'private', msg_id: 'c15',
-      sender_id: 'wxid_master', text: '普通消息',
-    });
-    assert.equal(skipped.data.ignored, true);
-    assert.equal(skipped.data.reason, 'offline');
+    assert.match(off.data.bubbles[0], /控制台/);
 
     const on = await cmd(base, {
       chat_id: 'wxid_master', chat_type: 'private', msg_id: 'c16',
       sender_id: 'wxid_master', text: '/online',
     });
-    assert.match(on.data.bubbles[0], /上线/);
+    assert.match(on.data.bubbles[0], /控制台/);
   } finally {
     server.close();
     fs.rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });

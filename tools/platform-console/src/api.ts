@@ -80,3 +80,24 @@ export async function saveAccess(platform: 'qq' | 'wechat', access: PlatformAcce
   if (!r.ok) throw new Error('save access HTTP ' + r.status);
 }
 
+export interface OnlineState {
+  wechat: boolean;
+  qq: boolean;
+}
+
+export async function fetchOnline(): Promise<{ online: OnlineState }> {
+  const r = await fetch('/api/online');
+  if (!r.ok) throw new Error('online HTTP ' + r.status);
+  return r.json();
+}
+
+export async function saveOnline(platform: 'qq' | 'wechat', online: boolean): Promise<void> {
+  const r = await fetch('/api/online', {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ platform, online }),
+  });
+  if (!r.ok) throw new Error('save online HTTP ' + r.status);
+}
+
+

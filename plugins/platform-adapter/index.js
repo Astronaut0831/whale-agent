@@ -368,17 +368,23 @@ export function apply(ctx, config = {}) {
   };
 
   const onlineFile = path.join(cfg.dataDir, 'bot-online.json');
-  function readOnline() {
+  function readOnline(platform = 'wechat') {
     try {
       const d = JSON.parse(fs.readFileSync(onlineFile, 'utf8'));
-      return d.online !== false;
+      if (typeof d[platform] === 'boolean') return d[platform];
+      if (typeof d.online === 'boolean') return d.online;
+      return true;
     } catch {
       return true;
     }
   }
-  function writeOnline(online) {
+  function writeOnline(platform, online) {
+    let prev = {};
+    try { prev = JSON.parse(fs.readFileSync(onlineFile, 'utf8')); } catch { /* ignore */ }
+    const next = { ...prev, [platform]: Boolean(online), at: Date.now() };
+    if (typeof next.online === 'boolean') delete next.online;
     fs.mkdirSync(cfg.dataDir, { recursive: true });
-    fs.writeFileSync(onlineFile, JSON.stringify({ online: Boolean(online), at: Date.now() }), 'utf8');
+    fs.writeFileSync(onlineFile, JSON.stringify(next), 'utf8');
   }
   async function handleOnlineControl(payload) {
     const text = String(payload.text || payload.content || '').trim();
@@ -386,14 +392,9 @@ export function apply(ctx, config = {}) {
     if (!m) return null;
     const sender = String(payload.sender_id || payload.senderId || '');
     if (sender !== masterWxid) return null;
-    const online = /online|上线/i.test(m[1]);
-    writeOnline(online);
-    log({ kind: 'online-command', online });
     const chatId = String(payload.chat_id || payload.chatId || '');
     const chatType = taskChatType(payload);
-    return taskReply(chatId, chatType, online
-      ? '我上线了，继续回消息。'
-      : '我先下线，不接消息、不主动发。发 /online 叫我。');
+    return taskReply(chatId, chatType, '上线/下线改到控制台 http://127.0.0.1:3100 的接入页操作。');
   }
 
   async function handleTaskCommand(payload) {
@@ -1500,6 +1501,22 @@ let lastMasterInboundAt = 0;
       return sendJson(res, 200, { ok: true, count: list.length });
     }
 
+    if (req.method === 'GET' && url.pathname === '/api/platforms/online') {
+      return sendJson(res, 200, { ok: true, online: { wechat: readOnline('wechat'), qq: readOnline('qq') } });
+    }
+
+    if (req.method === 'PUT' && url.pathname === '/api/platforms/online') {
+      if (!checkToken({ headers: req.headers, url: req.url }, token)) {
+        return sendJson(res, 401, { ok: false, error: 'bad token' });
+      }
+      const body = await readJson();
+      const platform = String(body.platform || '').toLowerCase();
+      if (!['wechat', 'qq'].includes(platform)) return sendJson(res, 400, { ok: false, error: 'unknown platform' });
+      writeOnline(platform, body.online === true);
+      log({ kind: 'online-api', platform, online: body.online === true });
+      return sendJson(res, 200, { ok: true, platform, online: readOnline(platform) });
+    }
+
     if (req.method === 'GET' && url.pathname === '/api/platforms/access') {
       const platform = String(url.searchParams.get('platform') || '').toLowerCase();
       if (platform) return sendJson(res, 200, { ok: true, platform, access: getAccess(platform) });
@@ -1929,7 +1946,7 @@ let lastMasterInboundAt = 0;
         const _cid = String(payload.chat_id || payload.chatId || payload.from || '');
         if (platform === 'wechat' && _cid && masterWxid && _cid === String(masterWxid)) lastMasterInboundAt = Date.now();
       } catch { /* ignore */ }
-      if (!readOnline()) return sendJson(res, 200, { ok: true, ignored: true, reason: 'offline' });
+      if (!readOnline(platform)) return sendJson(res, 200, { ok: true, ignored: true, reason: 'offline' });
 
       if (platform === 'wechat') {
         collectSticker(payload).catch(() => {});

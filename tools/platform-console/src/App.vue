@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue';
 import { darkTheme, NButton, NConfigProvider, NGlobalStyle, NInput, NTag, useOsTheme } from 'naive-ui';
-import { fetchAccess, fetchLogs, fetchSeen, fetchStatus, saveAccess, type AccessResponse, type SeenResponse, type Status } from './api';
+import { fetchAccess, fetchLogs, fetchOnline, fetchSeen, fetchStatus, saveAccess, saveOnline, type AccessResponse, type OnlineState, type SeenResponse, type Status } from './api';
 
 const osTheme = useOsTheme();
 const theme = computed(() => (osTheme.value === 'dark' ? darkTheme : null));
@@ -17,6 +17,7 @@ const view = ref<'monitor' | 'access'>('monitor');
 const access = ref<AccessResponse | null>(null);
 const seen = ref<SeenResponse | null>(null);
 const accessPlatform = ref<'qq' | 'wechat'>('qq');
+const online = ref<OnlineState>({ wechat: true, qq: true });
 const accessError = ref('');
 const saving = ref(false);
 const newGroup = ref('');
@@ -74,9 +75,21 @@ const pendingPrivates = computed(() => {
 
 async function loadAccess() {
   try {
-    const [a, s] = await Promise.all([fetchAccess(), fetchSeen()]);
+    const [a, s, o] = await Promise.all([fetchAccess(), fetchSeen(), fetchOnline()]);
     access.value = a;
     seen.value = s;
+    online.value = o.online;
+    accessError.value = '';
+  } catch (e) {
+    accessError.value = String((e as Error)?.message || e);
+  }
+}
+
+async function toggleOnline(platform: 'qq' | 'wechat') {
+  try {
+    const next = !online.value[platform];
+    await saveOnline(platform, next);
+    online.value = { ...online.value, [platform]: next };
     accessError.value = '';
   } catch (e) {
     accessError.value = String((e as Error)?.message || e);
@@ -298,6 +311,10 @@ onUnmounted(() => {
             <NButton size="small" :type="accessPlatform === 'qq' ? 'primary' : 'default'" @click="accessPlatform = 'qq'">QQ</NButton>
             <NButton size="small" :type="accessPlatform === 'wechat' ? 'primary' : 'default'" @click="accessPlatform = 'wechat'">微信</NButton>
             <NButton size="small" type="primary" :loading="saving" @click="saveCurrentAccess">保存</NButton>
+            <NTag size="small" :type="online[accessPlatform] ? 'success' : 'error'">{{ online[accessPlatform] ? '在线' : '离线' }}</NTag>
+            <NButton size="small" :type="online[accessPlatform] ? 'error' : 'success'" ghost @click="toggleOnline(accessPlatform)">
+              {{ online[accessPlatform] ? '下线' : '上线' }}
+            </NButton>
           </div>
           <p v-if="accessError" class="empty">读取/保存失败：{{ accessError }}</p>
           <p class="meta">只有 allowlist 里的会话会进入 adapter；未批准会话只显示在下面。</p>
