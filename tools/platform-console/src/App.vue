@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue';
 import { darkTheme, NButton, NConfigProvider, NGlobalStyle, NInput, NTag, useOsTheme } from 'naive-ui';
-import { fetchAccess, fetchLogs, fetchOnline, fetchSeen, fetchStatus, saveAccess, saveOnline, type AccessResponse, type OnlineState, type SeenResponse, type Status } from './api';
+import { fetchAccess, fetchLogs, fetchOnline, fetchPersona, fetchSeen, fetchStatus, saveAccess, saveOnline, savePersona, type AccessResponse, type OnlineState, type SeenResponse, type Status } from './api';
 
 const osTheme = useOsTheme();
 const theme = computed(() => (osTheme.value === 'dark' ? darkTheme : null));
@@ -20,6 +20,8 @@ const accessPlatform = ref<'qq' | 'wechat'>('qq');
 const online = ref<OnlineState>({ wechat: true, qq: true });
 const accessError = ref('');
 const saving = ref(false);
+const persona = ref('');
+const personaSaving = ref(false);
 const newGroup = ref('');
 const newPrivate = ref('');
 
@@ -82,6 +84,20 @@ async function loadAccess() {
     accessError.value = '';
   } catch (e) {
     accessError.value = String((e as Error)?.message || e);
+    return;
+  }
+  try { persona.value = await fetchPersona(); } catch { /* persona endpoint may lag adapter reload */ }
+}
+
+async function savePersonaText() {
+  personaSaving.value = true;
+  try {
+    await savePersona(persona.value);
+    accessError.value = '';
+  } catch (e) {
+    accessError.value = String((e as Error)?.message || e);
+  } finally {
+    personaSaving.value = false;
   }
 }
 
@@ -355,6 +371,16 @@ onUnmounted(() => {
           <div class="header-actions" style="margin-top: 12px">
             <input v-model="newPrivate" class="text-input" placeholder="QQ 号 / wxid" @keyup.enter="addPrivate" />
             <NButton size="small" @click="addPrivate">添加</NButton>
+          </div>
+        </article>
+
+        <article class="card full">
+          <p class="card-title">全局人设</p>
+          <p class="meta">影响微信和 QQ；保存前会自动备份。只改人设正文，运行规则段落保留。</p>
+          <textarea v-model="persona" class="persona-input" rows="9" spellcheck="false" />
+          <div class="header-actions" style="margin-top: 10px">
+            <NButton size="small" type="primary" :loading="personaSaving" @click="savePersonaText">保存人设</NButton>
+            <span class="meta">{{ persona.length }} 字符</span>
           </div>
         </article>
 

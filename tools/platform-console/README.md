@@ -1,6 +1,6 @@
 # Whale Platform Console
 
-多端控制台：监控为只读，接入页可编辑 QQ/微信 allowlist。不做启停/persona/queue 编辑。
+多端控制台：监控为只读；接入页可编辑 QQ/微信 allowlist、平台上下线、全局人设。不做启停/persona 版本管理/queue 编辑。
 
 ```text
 Vue 3 + Vite + TypeScript + Naive UI
@@ -56,6 +56,10 @@ GET /api/platforms
 GET /api/access
 GET /api/seen
 PUT /api/access
+GET /api/online
+PUT /api/online
+GET /api/persona
+PUT /api/persona
 ```
 
 `PUT /api/access` 只允许本机控制台代理到 adapter；adapter 侧仍要求 `x-bot-token`。

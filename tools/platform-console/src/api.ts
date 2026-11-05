@@ -100,4 +100,21 @@ export async function saveOnline(platform: 'qq' | 'wechat', online: boolean): Pr
   if (!r.ok) throw new Error('save online HTTP ' + r.status);
 }
 
+export async function fetchPersona(): Promise<string> {
+  const r = await fetch('/api/persona');
+  if (!r.ok) throw new Error('persona HTTP ' + r.status);
+  const d = await r.json();
+  return String(d.persona || '');
+}
+
+export async function savePersona(persona: string): Promise<void> {
+  const r = await fetch('/api/persona', {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ persona }),
+  });
+  if (!r.ok) throw new Error('save persona HTTP ' + r.status);
+}
+
+
 

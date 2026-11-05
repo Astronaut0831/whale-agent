@@ -1517,6 +1517,39 @@ let lastMasterInboundAt = 0;
       return sendJson(res, 200, { ok: true, platform, online: readOnline(platform) });
     }
 
+    if (req.method === 'GET' && url.pathname === '/api/persona') {
+      try {
+        return sendJson(res, 200, { ok: true, persona: String(fs.readFileSync(cfg.personaFile, 'utf8')) });
+      } catch (e) {
+        return sendJson(res, 500, { ok: false, error: String(e && e.message || e) });
+      }
+    }
+
+    if (req.method === 'PUT' && url.pathname === '/api/persona') {
+      if (!checkToken({ headers: req.headers, url: req.url }, token)) {
+        return sendJson(res, 401, { ok: false, error: 'bad token' });
+      }
+      const body = await readJson();
+      const next = String(body.persona || '');
+      if (next.trim().length < 30) return sendJson(res, 400, { ok: false, error: 'persona too short' });
+      try {
+        const old = String(fs.readFileSync(cfg.personaFile, 'utf8'));
+        const marker = '## Agent 运行规则';
+        const idx = old.indexOf(marker);
+        const suffix = idx >= 0 ? '\n\n' + old.slice(idx) : '';
+        fs.mkdirSync(path.join(cfg.dataDir, 'persona-backups'), { recursive: true });
+        fs.writeFileSync(path.join(cfg.dataDir, 'persona-backups', Date.now() + '.md'), old, 'utf8');
+        fs.writeFileSync(cfg.personaFile, next.trim() + suffix, 'utf8');
+        const conf = readWhaleConfig(cfg.whaleConfigPath);
+        conf.persona = conf.persona || {};
+        conf.persona.customPrompt = next.trim();
+        writeWhaleConfig(conf);
+        return sendJson(res, 200, { ok: true, length: next.trim().length });
+      } catch (e) {
+        return sendJson(res, 500, { ok: false, error: String(e && e.message || e) });
+      }
+    }
+
     if (req.method === 'GET' && url.pathname === '/api/platforms/access') {
       const platform = String(url.searchParams.get('platform') || '').toLowerCase();
       if (platform) return sendJson(res, 200, { ok: true, platform, access: getAccess(platform) });

@@ -206,6 +206,18 @@ const server = http.createServer(async (req, res) => {
         snowlumaUrl: SNOWLUMA_URL,
       });
     }
+    if (url.pathname === '/api/persona' && req.method === 'GET') {
+      return sendJson(res, 200, await adapterFetch('/api/persona'));
+    }
+    if (url.pathname === '/api/persona' && req.method === 'PUT') {
+      const raw = await readBody(req, 1024 * 1024);
+      let body;
+      try { body = JSON.parse(raw || '{}'); } catch { return sendJson(res, 400, { ok: false, error: 'bad json' }); }
+      return sendJson(res, 200, await adapterFetch('/api/persona', {
+        method: 'PUT',
+        body: JSON.stringify(body),
+      }));
+    }
     if (url.pathname === '/api/online' && req.method === 'GET') {
       return sendJson(res, 200, await adapterFetch('/api/platforms/online'));
     }
