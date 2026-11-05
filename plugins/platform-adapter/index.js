@@ -1509,7 +1509,7 @@ let lastMasterInboundAt = 0;
       const list = (Array.isArray(body.bubbles) ? body.bubbles : [body.text]).map(String).map((x) => x.trim()).filter(Boolean);
       if (!body.chatId || !list.length) return sendJson(res, 400, { ok: false, error: 'chatId/bubbles required' });
       for (const text of list) {
-        enqueue({ chatId: String(body.chatId), chatType: body.chatType === 'group' ? 'group' : 'private', kind: 'text', text });
+        enqueue({ platform: String(body.platform || 'wechat'), chatId: String(body.chatId), chatType: body.chatType === 'group' ? 'group' : 'private', kind: 'text', text });
       }
       return sendJson(res, 200, { ok: true, count: list.length });
     }
