@@ -34,6 +34,7 @@ import { createGroupHistory } from './lib/group-history.js';
 import { createGroupPolicy } from './lib/group-policy.js';
 import { setAccessFiles, getAccess, updateAccess, loadSeen, recordSeen } from './lib/platform-access.js';
 import { helpText } from './lib/commands.js';
+import { createChatBatcher } from './lib/wechat-batch.js';
 
 const localRequire = createRequire(import.meta.url);
 let loadLegacyConfig = null;
@@ -365,6 +366,13 @@ export function apply(ctx, config = {}) {
       return 'wechat:u:' + masterWxid;
     }
     return platform + ':' + (chatType === 'group' ? 'g' : 'u') + ':' + chatId;
+  };
+  const wechatBatcher = createChatBatcher({ windowMs: Number(cfg.wechatBatchMs) || 900 });
+  const canBatchWechat = (payload) => {
+    if (payload.image || payload.image_base64 || payload.file_path || payload.is_sticker) return false;
+    if (payload.at_me || payload.atMe || payload.reply_to_bot || payload.replyToBot) return false;
+    const text = String(payload.text || payload.content || '').trim();
+    return Boolean(text) && !text.startsWith('/');
   };
   const inboundAllowed = (platform, payload) => {
     const access = getAccess(platform);
@@ -1996,6 +2004,20 @@ let lastMasterInboundAt = 0;
         if (platform === 'wechat' && _cid && masterWxid && _cid === String(masterWxid)) lastMasterInboundAt = Date.now();
       } catch { /* ignore */ }
       if (!readOnline(platform)) return sendJson(res, 200, { ok: true, ignored: true, reason: 'offline' });
+
+      if (platform === 'wechat' && canBatchWechat(payload)) {
+        const batchChatId = String(payload.chat_id || payload.chatId || '');
+        const batchSenderId = String(payload.sender_id || payload.senderId || payload.user_id || '');
+        const batchKey = taskChatType(payload) === 'group' ? batchChatId + ':' + batchSenderId : batchChatId;
+        const batch = await wechatBatcher.push(batchKey, payload);
+        if (batch && batch.primary === false) {
+          return sendJson(res, 200, { ok: true, merged: true });
+        }
+        if (batch && batch.primary) {
+          payload = batch.payload;
+          log({ kind: 'wechat-batch', chatId: payload.chat_id, count: batch.count, text: String(payload.text || '').slice(0, 120) });
+        }
+      }
 
       if (platform === 'wechat') {
         collectSticker(payload).catch(() => {});
