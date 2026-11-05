@@ -36,7 +36,7 @@ function cleanIds(list) {
 function defaults() {
   return {
     wechat: { groups: [], privates: [] },
-    qq: { groups: [], privates: [], allowAllGroups: false },
+    qq: { groups: [], privates: [], allowAllGroups: false, owner: '' },
   };
 }
 
@@ -48,6 +48,7 @@ function normalize(input) {
     d[platform].groups = cleanIds(p.groups);
     d[platform].privates = cleanIds(p.privates);
     if ('allowAllGroups' in d[platform]) d[platform].allowAllGroups = p.allowAllGroups === true;
+    if ('owner' in d[platform]) d[platform].owner = String(p.owner || '').trim().slice(0, 64);
   }
   return d;
 }
@@ -68,6 +69,7 @@ export function updateAccess(platform, patch = {}) {
   if (Array.isArray(patch.groups)) all[p].groups = cleanIds(patch.groups);
   if (Array.isArray(patch.privates)) all[p].privates = cleanIds(patch.privates);
   if ('allowAllGroups' in all[p]) all[p].allowAllGroups = patch.allowAllGroups === true;
+  if ('owner' in all[p] && typeof patch.owner === 'string') all[p].owner = patch.owner.trim().slice(0, 64);
   atomic(FILE, all);
   return all[p];
 }

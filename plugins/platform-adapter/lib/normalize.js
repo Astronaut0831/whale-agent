@@ -50,6 +50,14 @@ export function normalizeInbound(payload = {}) {
     ts,
     raw: payload,
   };
+  // Owner QQ private shares the master memory scope with WeChat. Keep the
+  // transport chatId (needed for outbox) but route the agent/memory session to
+  // the same scope as WeChat master private chat.
+  const qqOwner = String(payload._qqOwner || '').trim();
+  const masterWxid = String(payload._masterWxid || '').trim();
+  if (platform === 'qq' && chatType === 'private' && qqOwner && masterWxid && chatId === qqOwner) {
+    msg.sessionKey = 'wechat:u:' + masterWxid;
+  }
   msg.envelope = fromWechat(msg);
   return msg;
 }

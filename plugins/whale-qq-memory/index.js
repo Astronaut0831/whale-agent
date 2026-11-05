@@ -2,8 +2,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { repoRoot } from '../lib/runtime.js';
-import { registerMemoryTools } from '../wechat-adapter/lib/memory-tools.js';
-import { recallContext } from '../wechat-adapter/lib/memory-context.js';
+import { registerMemoryTools } from '../platform-adapter/lib/memory-tools.js';
+import { recallContext } from '../platform-adapter/lib/memory-context.js';
 
 function readJson(file) {
   try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return {}; }

@@ -11,7 +11,7 @@
        ├─ UIA 发送
        ├─ 微信 DB 只读监听
        └─ POST /webhook/wechat
-            └─ wechat-adapter :8788
+            └─ platform-adapter :8788
                  ├─ commands / mute / group policy
                  ├─ 群聊 → headless agent
                  ├─ 主子私聊 → GUI broker :3080

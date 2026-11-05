@@ -92,6 +92,7 @@ async function saveCurrentAccess() {
       groups: p.groups,
       privates: p.privates,
       allowAllGroups: p.allowAllGroups,
+      owner: p.owner,
     });
     accessError.value = '';
     await loadSeenOnly();
@@ -304,6 +305,10 @@ onUnmounted(() => {
             <input v-model="platformAccess.allowAllGroups" type="checkbox" />
             允许所有群（危险，SnowLuma 会收到账号全部群消息）
           </label>
+          <div v-if="accessPlatform === 'qq'" class="header-actions" style="margin-top: 10px">
+            <span class="meta">主人 QQ（共用微信主人记忆）</span>
+            <input v-model="platformAccess.owner" class="text-input" placeholder="QQ 号" />
+          </div>
         </article>
 
         <article class="card wide">

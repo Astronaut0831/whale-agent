@@ -1,5 +1,5 @@
 import fs from 'node:fs';
-import { createGuiBroker, extractTokenFromLog } from '../plugins/wechat-adapter/lib/gui-broker.js';
+import { createGuiBroker, extractTokenFromLog } from '../plugins/platform-adapter/lib/gui-broker.js';
 
 const log = fs.readFileSync('data/gui-3080.log', 'utf8');
 const token = extractTokenFromLog(log);

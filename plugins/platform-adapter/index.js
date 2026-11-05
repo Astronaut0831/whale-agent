@@ -33,6 +33,7 @@ import { setOutboxFile, enqueue, take, ack, resetSending } from './lib/outbox.js
 import { createGroupHistory } from './lib/group-history.js';
 import { createGroupPolicy } from './lib/group-policy.js';
 import { setAccessFiles, getAccess, updateAccess, loadSeen, recordSeen } from './lib/platform-access.js';
+import { helpText } from './lib/commands.js';
 
 const localRequire = createRequire(import.meta.url);
 let loadLegacyConfig = null;
@@ -50,7 +51,7 @@ try {
   legacyUsb = localRequire('../../src/usb.js');
 } catch { /* optional legacy features */ }
 
-export const name = 'wechat-adapter';
+export const name = 'platform-adapter';
 export const inject = ['agents', 'systemPrompt'];
 
 const DEFAULTS = {
@@ -94,7 +95,7 @@ const DEFAULTS = {
 };
 
 export function pingPayload() {
-  return { ok: true, plugin: 'wechat-adapter' };
+  return { ok: true, plugin: 'platform-adapter' };
 }
 
 function readWhaleConfig(path) {
@@ -202,6 +203,7 @@ export function apply(ctx, config = {}) {
     behavior: behavior,
   });
   const masterWxid = String(((whale.persona || {}).master || {}).wxids?.[0] || '');
+  const qqOwner = () => String(cfg.qqOwner || process.env.WHALE_QQ_OWNER || getAccess('qq')?.owner || '');
   const token = String(((whale.gateway || {}).wechat || {}).inboundToken || '');
 
   // Cheap first-stage gate: full recent group context, tiny output. The full
@@ -353,9 +355,16 @@ export function apply(ctx, config = {}) {
     const t = String(payload.chat_type || payload.chatType || '').toLowerCase();
     return t === 'group' || t === '群' ? 'group' : 'private';
   };
-  const taskReply = (chatId, chatType, text) => {
-    enqueue({ chatId, chatType, kind: 'text', text: String(text || '') });
+  const taskReply = (chatId, chatType, text, platform) => {
+    const p = platform || (/^\d+$/.test(String(chatId || '')) ? 'qq' : 'wechat');
+    enqueue({ platform: p, chatId, chatType, kind: 'text', text: String(text || '') });
     return { ok: true, bubbles: [String(text || '')] };
+  };
+  const scopeFor = (platform, chatType, chatId, senderId) => {
+    if (platform === 'qq' && chatType === 'private' && qqOwner() && masterWxid && String(senderId) === qqOwner()) {
+      return 'wechat:u:' + masterWxid;
+    }
+    return platform + ':' + (chatType === 'group' ? 'g' : 'u') + ':' + chatId;
   };
 
   const onlineFile = path.join(cfg.dataDir, 'bot-online.json');
@@ -434,32 +443,29 @@ let lastMasterInboundAt = 0;
     const chatId = String(payload.chat_id || payload.chatId || '');
     const chatType = taskChatType(payload);
     const sender = String(payload.sender_id || payload.senderId || '');
-    const isMaster = sender === masterWxid;
+    const platform = String(payload.platform || 'wechat').toLowerCase();
+    const ownerId = qqOwner();
+    const isMaster = platform === 'wechat' ? sender === masterWxid : Boolean(ownerId) && sender === ownerId;
     const arg = String(m[2] || '').trim();
+    const REMOVED = new Set(['agent', 'ls', 'sendfile', 'dl', 'run']);
+    const CONSOLE_ONLY = new Set(['persona', 'listen', 'online', 'offline']);
+    if (REMOVED.has(cmd)) {
+      return taskReply(chatId, chatType, '这个命令已移除；文件/脚本操作交给 agent。', platform);
+    }
+    if (CONSOLE_ONLY.has(cmd)) {
+      return taskReply(chatId, chatType, '这个操作在控制台 http://127.0.0.1:3100 里做。', platform);
+    }
+    // QQ command surface is not opened yet; /help is safe and platform-aware.
+    if (platform === 'qq' && cmd !== 'help') return null;
 
     if (cmd === 'help') {
-      const body = [
-        '/help  看命令',
-        '/status  运行状态（主人）',
-        '/mute [分钟]  闭麦（主人）',
-        '/unmute  解除闭麦（主人）',
-        '/talk 少|正常|多  群说话频率（主人，群聊）',
-        '/listen ...  监听白名单（主人）',
-        '/corpus on|off  群语料收集（主人，群聊）',
-        '/proactive on|off  群聊主动起话题（主人）',
-        '/care on|off  个人主动关心（主人）',
-        '/offline / /online  全局下线/上线（主人）',
-        '/remind  提醒列表/取消（主人）',
-            '/behavior [set key value|reset]  行为参数（主人）',
-        '/pref add|list|del ...  全局规矩（主人）',
-        '/persona [show|<人设>]  查看/替换人设（主人）',
-        '/facts [搜|详情|删|恢复]  长期记忆',
-        '/memory  记忆概览',
-        '/backup [drives|status]  记忆快照（主人）',
-        '/task list|cancel|<指令>  后台任务（主人）',
-        '（set/backup 等仍在迁移）',
-      ].join('\n');
-      return taskReply(chatId, chatType, body);
+      const body = helpText({
+        platform,
+        chatType,
+        isMaster,
+        capabilities: new Set(['text', 'image', 'file', 'memory']),
+      });
+      return taskReply(chatId, chatType, body || '没有可用命令。');
     }
 
     if (cmd === 'status') {
@@ -713,7 +719,7 @@ let lastMasterInboundAt = 0;
     }
 
     if (cmd === 'facts' || cmd === 'memory') {
-      const scope = 'wechat:' + (chatType === 'group' ? 'g' : 'u') + ':' + chatId;
+      const scope = scopeFor(platform, chatType, chatId, sender);
       const a = String(arg || '').trim();
       const q = a.replace(/^(搜|搜索|找|查)[\s:：]*/i, '').trim();
       try {
@@ -833,7 +839,7 @@ let lastMasterInboundAt = 0;
     }
 
     if (cmd === 'digest') {
-      const scope = 'wechat:' + (chatType === 'group' ? 'g' : 'u') + ':' + chatId;
+      const scope = scopeFor(platform, chatType, chatId, sender);
       try {
         const st = JSON.parse(fs.readFileSync(cfg.dataDir + '/memory-digest-state.json', 'utf8')) || {};
         const lines = (st[scope] && st[scope].digest) || [];
@@ -1512,6 +1518,7 @@ let lastMasterInboundAt = 0;
           groups: body.groups,
           privates: body.privates,
           allowAllGroups: body.allowAllGroups,
+          owner: body.owner,
         });
         return sendJson(res, 200, { ok: true, platform, access });
       } catch (e) {
@@ -1875,7 +1882,7 @@ let lastMasterInboundAt = 0;
     }
 
     if (req.method === 'GET' && (url.pathname === '/healthz' || url.pathname === '/')) {
-      return sendJson(res, 200, { ok: true, service: 'wechat-adapter' });
+      return sendJson(res, 200, { ok: true, service: 'platform-adapter' });
     }
     if (req.method === 'GET' && url.pathname === '/api/status') {
       let stickers = { enabled: false };
@@ -1884,7 +1891,7 @@ let lastMasterInboundAt = 0;
       try { tasks = tasksStore.list(5).map((t) => ({ id: t.id, status: t.status, instruction: String(t.instruction).slice(0, 40) })); } catch { /* ignore */ }
       return sendJson(res, 200, {
         ok: true,
-        service: 'wechat-adapter',
+        service: 'platform-adapter',
         mode: readMode(cfg.modeFile),
         online: readOnline(),
         legacyEnabled: cfg.legacyEnabled !== false,
@@ -1909,6 +1916,8 @@ let lastMasterInboundAt = 0;
       try { payload = JSON.parse(await readBody(req, cfg.maxBodyBytes)); }
       catch { return sendJson(res, 400, { ok: false, error: 'bad json' }); }
       payload.platform = platform;
+      payload._masterWxid = masterWxid;
+      payload._qqOwner = qqOwner();
 
       const msgId = String(payload.msg_id || payload.msgId || '');
       if (msgId && seen.has(msgId)) return sendJson(res, 200, { ok: true, duplicate: true });
@@ -1941,6 +1950,12 @@ let lastMasterInboundAt = 0;
         if (reminderCmd) {
           log({ kind: 'reminder', text: String(payload.text || '').slice(0, 80), bubbles: reminderCmd.bubbles });
           return sendJson(res, 200, reminderCmd);
+        }
+      } else if (platform === 'qq' && /^\/help\b/i.test(String(payload.text || ''))) {
+        const miscCmd = await handleMiscCommand(payload);
+        if (miscCmd) {
+          log({ kind: 'admin-command', platform, text: String(payload.text || '').slice(0, 80), bubbles: miscCmd.bubbles });
+          return sendJson(res, 200, miscCmd);
         }
       }
 

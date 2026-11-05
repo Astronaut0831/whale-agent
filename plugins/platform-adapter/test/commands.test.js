@@ -44,7 +44,7 @@ async function cmd(base, body) {
   return { status: r.status, data: await r.json() };
 }
 
-test('/listen list 返回白名单', async () => {
+test('/listen 已迁移到控制台', async () => {
   const { dir, server, base } = await setup();
   try {
     const r = await cmd(base, {
@@ -52,7 +52,7 @@ test('/listen list 返回白名单', async () => {
       sender_id: 'wxid_master', text: '/listen list',
     });
     assert.equal(r.status, 200);
-    assert.match(r.data.bubbles[0], /听消息/);
+    assert.match(r.data.bubbles[0], /控制台/);
   } finally {
     server.close();
     fs.rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
@@ -127,7 +127,7 @@ test('/behavior 和 /pref list 可用', async () => {
   }
 });
 
-test('/set bubbles 写入 config，/digest 和 /ls 可用', async () => {
+test('/set bubbles 写入 config，/digest 可用，/ls 已移除', async () => {
   const { dir, cfgFile, server, base } = await setup();
   try {
     const s = await cmd(base, {
@@ -148,43 +148,30 @@ test('/set bubbles 写入 config，/digest 和 /ls 可用', async () => {
       chat_id: 'wxid_master', chat_type: 'private', msg_id: 'c10',
       sender_id: 'wxid_master', text: '/ls',
     });
-    assert.equal(l.status, 200);
+    assert.match(l.data.bubbles[0], /已移除/);
   } finally {
     server.close();
     fs.rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }
 });
 
-test('/sendfile 发 workspace 文件，/run 需要 --yes', async () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'whale-ws-'));
-  const workspace = path.join(dir, 'workspace');
-  fs.mkdirSync(workspace, { recursive: true });
-  fs.writeFileSync(path.join(workspace, 'note.txt'), 'hello');
-  fs.writeFileSync(path.join(workspace, 'ok.js'), 'console.log("hi-js")');
-  const s = await setup({ workspace });
+test('/sendfile 与 /run 已移除', async () => {
+  const { dir, server, base } = await setup();
   try {
-    const f = await cmd(s.base, {
+    const f = await cmd(base, {
       chat_id: 'wxid_master', chat_type: 'private', msg_id: 'c11',
       sender_id: 'wxid_master', text: '/sendfile note.txt',
     });
-    assert.match(f.data.bubbles[0], /发你了/);
-    const box = JSON.parse(fs.readFileSync(path.join(s.dir, 'outbox.json'), 'utf8'));
-    assert.equal(box.items[0].kind, 'file');
+    assert.match(f.data.bubbles[0], /已移除/);
 
-    const no = await cmd(s.base, {
+    const run = await cmd(base, {
       chat_id: 'wxid_master', chat_type: 'private', msg_id: 'c12',
-      sender_id: 'wxid_master', text: '/run ok.js',
-    });
-    assert.match(no.data.bubbles[0], /--yes/);
-    const yes = await cmd(s.base, {
-      chat_id: 'wxid_master', chat_type: 'private', msg_id: 'c13',
       sender_id: 'wxid_master', text: '/run --yes ok.js',
     });
-    assert.match(yes.data.bubbles[0], /hi-js/);
+    assert.match(run.data.bubbles[0], /已移除/);
   } finally {
-    s.server.close();
+    server.close();
     fs.rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
-    fs.rmSync(s.dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }
 });
 

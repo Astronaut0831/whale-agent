@@ -1,6 +1,6 @@
 /** 给 headless 启动的 agent 注册记忆工具（scope 来自环境变量）。 */
 
-import { registerMemoryTools } from '../wechat-adapter/lib/memory-tools.js';
+import { registerMemoryTools } from '../platform-adapter/lib/memory-tools.js';
 import { resolveTarget, resolveMemoryToken } from '../lib/runtime.js';
 
 export const name = 'whale-memory-tools';

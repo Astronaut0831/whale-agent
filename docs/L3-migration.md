@@ -71,7 +71,7 @@
 
 | 组件 | 作用 |
 |---|---|
-| `wechat-adapter` | 消息→核心，回复→outbox |
+| `platform-adapter` | 消息→核心，回复→outbox |
 | `memory-api` | recall/remember/narrative/audit |
 | `sticker-tools` | send_sticker / 盗图入库 |
 | `proactive-scheduler` | schedule 触发 care/群话题/报备 |

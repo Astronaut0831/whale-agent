@@ -39,6 +39,7 @@ export interface PlatformAccess {
   groups: string[];
   privates: string[];
   allowAllGroups?: boolean;
+  owner?: string;
 }
 
 export interface AccessResponse {

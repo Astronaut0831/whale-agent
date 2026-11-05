@@ -18,8 +18,8 @@ const key = 'wechat:u:<WXID>';
 const limit = Number(process.argv[2]) || 5;
 
 (async () => {
-  const { runHeadlessTurn } = await import('../plugins/wechat-adapter/lib/headless.js');
-  const { recallContext } = await import('../plugins/wechat-adapter/lib/memory-context.js');
+  const { runHeadlessTurn } = await import('../plugins/platform-adapter/lib/headless.js');
+  const { recallContext } = await import('../plugins/platform-adapter/lib/memory-context.js');
   const cfg = JSON.parse(fs.readFileSync(path.join(root, 'config.json'), 'utf8'));
   const token = String(((cfg.gateway || {}).wechat || {}).inboundToken || '');
   const db = new DatabaseSync(dbFile);

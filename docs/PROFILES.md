@@ -39,7 +39,7 @@ powershell -File tools\set-runtime.ps1 -SessionId "<SESSION_ID>" -MemoryToken "<
   "dsh": { "profile": { "bundles": ["@deepseek-ai/dsh-base"] } },
   "dependencies": {
     "@deepseek-ai/dsh-host-webserver": "0.2.1-rc.2",
-    "@whale/wechat-adapter": "link:<REPO>/plugins/wechat-adapter"
+    "@whale/platform-adapter": "link:<REPO>/plugins/platform-adapter"
   }
 }
 ```
@@ -48,8 +48,8 @@ powershell -File tools\set-runtime.ps1 -SessionId "<SESSION_ID>" -MemoryToken "<
 
 ```yaml
 - insert:
-    - id: wechat-adapter
-      name: "@whale/wechat-adapter"
+    - id: platform-adapter
+      name: "@whale/platform-adapter"
       config:
         legacyEnabled: false
         groupEnabled: true
