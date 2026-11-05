@@ -5,7 +5,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 
 const roots = [
-  'plugins/wechat-adapter/test',
+  'plugins/platform-adapter/test',
   'plugins/whale-memory-tools/test',
   'plugins/whale-memory-core/test',
   'plugins/whale-system-context/test',
