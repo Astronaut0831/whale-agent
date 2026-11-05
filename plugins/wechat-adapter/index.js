@@ -32,6 +32,7 @@ import { recentUserTexts } from './lib/recent-context.js';
 import { setOutboxFile, enqueue, take, ack, resetSending } from './lib/outbox.js';
 import { createGroupHistory } from './lib/group-history.js';
 import { createGroupPolicy } from './lib/group-policy.js';
+import { setAccessFiles, getAccess, updateAccess, loadSeen, recordSeen } from './lib/platform-access.js';
 
 const localRequire = createRequire(import.meta.url);
 let loadLegacyConfig = null;
@@ -333,6 +334,7 @@ export function apply(ctx, config = {}) {
   }
 
   setOutboxFile(cfg.outboxFile);
+  setAccessFiles(cfg.dataDir);
   const sendBubbles = async ({ platform = 'wechat', chatId, chatType, bubbles }) => {
     for (const text of bubbles || []) {
       enqueue({ platform, chatId, chatType: chatType || 'private', kind: 'text', text: String(text || '') });
@@ -994,13 +996,37 @@ let lastMasterInboundAt = 0;
         const lastAt = Number((hist[hist.length - 1] || {}).ts) || 0;
         if (!proactive.groupTopicAllowed(visionConfig, 'wechat:g:' + chatId, lastAt)) continue;
         const recent = hist.filter((m) => m.role === 'user' && m.text).slice(-8).map((m) => (m.name || '群友') + '：' + String(m.text).slice(0, 80)).join('\n');
-        const out = await careLlm.complete({
-          system: '你是群聊里的鲸鲸。根据最近的群聊内容，只输出一句适合现在发到群里的话（不超过25字，像随口加入聊天，别打招呼，别说教，别用引号，不要解释）。',
-          turns: [{ role: 'user', content: recent || '（群里很久没说话了）' }],
-          maxTokens: 100,
-          skipGovernor: true,
-        });
-        const line = String(out || '').split(/\n+/).map((x) => x.trim()).filter(Boolean).slice(-1)[0] || '';
+        // 群话题也交给「这个群自己的会话」生成：它看过这个群的上下文，接得上茬。
+        const direct = '（系统提示，不是群友说的话）群里刚安静下来。你自己想主动在群里说一句，一句就够，25 字以内，'
+          + '像随口接话。别打招呼、别说教、别用引号、别解释。只输出这句话本身。';
+        let line = '';
+        try {
+          const gg = cfg.guiBroker || {};
+          let tk = String(gg.token || '');
+          if (!tk && gg.tokenFile) {
+            try { tk = extractTokenFromLog(fs.readFileSync(gg.tokenFile, 'utf8')); } catch { /* ignore */ }
+          }
+          const sid = await ensureChatSession(tk, gg, chatId, String(gg.sessionId || ''));
+          const broker = getGuiBroker(tk, { ...gg, sessionId: sid });
+          const outG = await withLease('gui-broker:' + sid, () => broker.prompt(direct, []), {
+            dir: cfg.dataDir,
+            owner: 'adapter-' + process.pid,
+            ttlMs: Number(gg.leaseTtlMs) || 120000,
+            waitMs: Number(gg.leaseWaitMs) || 30000,
+          });
+          line = String((outG && outG.text) || '').split(/\n+/).map((x) => x.trim()).filter(Boolean).slice(-1)[0] || '';
+        } catch (e) {
+          log({ kind: 'group-topic-main-fail', error: String(e && e.message).slice(0, 120) });
+        }
+        if (!line && careLlm && !careLlm.isMock) {
+          const out = await careLlm.complete({
+            system: '你是群聊里的鲸鲸。根据最近的群聊内容，只输出一句适合现在发到群里的话（不超过25字，像随口加入聊天，别打招呼，别说教，别用引号，不要解释）。',
+            turns: [{ role: 'user', content: recent || '（群里很久没说话了）' }],
+            maxTokens: 100,
+            skipGovernor: true,
+          });
+          line = String(out || '').split(/\n+/).map((x) => x.trim()).filter(Boolean).slice(-1)[0] || '';
+        }
         const text = line.replace(/^["'「」]|["'「」]$/g, '').slice(0, 40);
         if (text.length < 4) continue;
         proactive.markGroupSent('wechat:g:' + chatId);
@@ -1468,6 +1494,51 @@ let lastMasterInboundAt = 0;
       return sendJson(res, 200, { ok: true, count: list.length });
     }
 
+    if (req.method === 'GET' && url.pathname === '/api/platforms/access') {
+      const platform = String(url.searchParams.get('platform') || '').toLowerCase();
+      if (platform) return sendJson(res, 200, { ok: true, platform, access: getAccess(platform) });
+      return sendJson(res, 200, { ok: true, access: { wechat: getAccess('wechat'), qq: getAccess('qq') } });
+    }
+
+    if (req.method === 'PUT' && url.pathname === '/api/platforms/access') {
+      if (!checkToken({ headers: req.headers, url: req.url }, token)) {
+        return sendJson(res, 401, { ok: false, error: 'bad token' });
+      }
+      const body = await readJson();
+      const platform = String(body.platform || '').toLowerCase();
+      if (!platform) return sendJson(res, 400, { ok: false, error: 'platform required' });
+      try {
+        const access = updateAccess(platform, {
+          groups: body.groups,
+          privates: body.privates,
+          allowAllGroups: body.allowAllGroups,
+        });
+        return sendJson(res, 200, { ok: true, platform, access });
+      } catch (e) {
+        return sendJson(res, 400, { ok: false, error: String(e && e.message || e) });
+      }
+    }
+
+    if (req.method === 'GET' && url.pathname === '/api/platforms/seen') {
+      const platform = String(url.searchParams.get('platform') || '').toLowerCase();
+      const seen = loadSeen();
+      return sendJson(res, 200, { ok: true, platform, seen: platform ? (seen[platform] || {}) : seen });
+    }
+
+    if (req.method === 'POST' && url.pathname === '/api/platforms/seen') {
+      if (!checkToken({ headers: req.headers, url: req.url }, token)) {
+        return sendJson(res, 401, { ok: false, error: 'bad token' });
+      }
+      const body = await readJson();
+      recordSeen({
+        platform: body.platform,
+        chatType: body.chatType,
+        chatId: body.chatId,
+        name: body.name,
+      });
+      return sendJson(res, 200, { ok: true });
+    }
+
     if (req.method === 'GET' && url.pathname === '/api/bridge/outbox') {
       const platform = String(url.searchParams.get('platform') || 'wechat');
       return sendJson(res, 200, { ok: true, items: take(10, platform) });
@@ -1557,11 +1628,28 @@ let lastMasterInboundAt = 0;
         if (!careLlm || careLlm.isMock) {
           text = care.pickTemplate();
         } else {
-          const { system, user } = care.buildCarePrompt({
-            persona: personaCfg, recent: [], name: String(personaCfg.ownerName || '主人'), hour: new Date().getHours(),
-          });
-          const raw = await careLlm.complete({ system, turns: [{ role: 'user', content: user }] });
-          text = care.cleanCareText(raw) || care.pickTemplate();
+          // 主动搭话的内容交给主会话生成：它知道我们聊过什么，不会编出「你上次说的那家店」。
+          const sid = (() => { try { return String(readRuntime({ runtimeFile: cfg.runtimeFile }).guiSessionId || ''); } catch { return ''; } })();
+          const direct = '（系统提示，不是主人发的消息）现在没人说话。你自己想主动给主人发一条微信，就一句，8~20 字。'
+            + '不许编他说过的事、提过的东西；不许写「在干啥」「累不累」这种空话；只输出这句话本身，不要引号。';
+          let viaMain = '';
+          if (sid) {
+            try {
+              const r = await runGuiInput(direct, sid);
+              viaMain = care.cleanCareText(r && r.text);
+            } catch (e) {
+              log({ kind: 'care-main-fail', error: String(e && e.message).slice(0, 120) });
+            }
+          }
+          if (viaMain) {
+            text = viaMain;
+          } else {
+            const { system, user } = care.buildCarePrompt({
+              persona: personaCfg, recent: [], name: String(personaCfg.ownerName || '主人'), hour: new Date().getHours(),
+            });
+            const raw = await careLlm.complete({ system, turns: [{ role: 'user', content: user }] });
+            text = care.cleanCareText(raw) || care.pickTemplate();
+          }
         }
         careDecision = { at: 0, due: false, reason: '' };
         return sendJson(res, 200, { ok: true, text });

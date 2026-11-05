@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
- * Whale platform console, read-only v0.1.
- * Binds 127.0.0.1:3100, serves the Vue build and a small status API.
+ * Whale platform console.
+ * Binds 127.0.0.1:3100, serves the Vue build and a small status/access API.
  */
 import fs from 'node:fs';
 import http from 'node:http';
@@ -18,7 +18,45 @@ const PORT = Number(process.env.CONSOLE_PORT) || 3100;
 const QQ_ROOT = process.env.QQ_BRIDGE_ROOT || 'D:/dsh-workspace/research/qq-bridge';
 const WEB_LOG = process.env.DSH_WEB_LOG || path.join(os.homedir(), 'AppData', 'Local', 'dsh', 'web.log');
 const SNOWLUMA_URL = process.env.SNOWLUMA_URL || 'http://127.0.0.1:5099';
-const ADAPTER_URL = process.env.ADAPTER_URL || 'http://127.0.0.1:8788';
+const ADAPTER_URL = (process.env.ADAPTER_URL || 'http://127.0.0.1:8788').replace(/\/+$/, '');
+
+function adapterToken() {
+  if (process.env.ADAPTER_TOKEN) return process.env.ADAPTER_TOKEN;
+  try {
+    const c = JSON.parse(fs.readFileSync(path.join(ROOT, 'config.json'), 'utf8'));
+    return String(c.gateway?.wechat?.inboundToken || '');
+  } catch { return ''; }
+}
+const INBOUND_TOKEN = adapterToken();
+
+async function adapterFetch(pathname, options = {}) {
+  const r = await fetch(ADAPTER_URL + pathname, {
+    ...options,
+    headers: {
+      'content-type': 'application/json',
+      ...(INBOUND_TOKEN ? { 'x-bot-token': INBOUND_TOKEN } : {}),
+      ...(options.headers || {}),
+    },
+    signal: AbortSignal.timeout(10000),
+  });
+  const text = await r.text();
+  let data = null;
+  try { data = JSON.parse(text); } catch { /* ignore */ }
+  if (!r.ok) throw new Error('adapter HTTP ' + r.status + ': ' + text.slice(0, 200));
+  return data;
+}
+
+function readBody(req, limit = 256 * 1024) {
+  return new Promise((resolve, reject) => {
+    let buf = '';
+    req.on('data', (c) => {
+      buf += c;
+      if (buf.length > limit) { reject(new Error('body too large')); req.destroy(); }
+    });
+    req.on('end', () => resolve(buf));
+    req.on('error', reject);
+  });
+}
 
 const PORTS = [
   { name: 'DSH GUI', port: 3080 },
@@ -167,6 +205,25 @@ const server = http.createServer(async (req, res) => {
         ],
         snowlumaUrl: SNOWLUMA_URL,
       });
+    }
+    if (url.pathname === '/api/access' && req.method === 'GET') {
+      const platform = String(url.searchParams.get('platform') || '');
+      const suffix = platform ? '?platform=' + encodeURIComponent(platform) : '';
+      return sendJson(res, 200, await adapterFetch('/api/platforms/access' + suffix));
+    }
+    if (url.pathname === '/api/seen' && req.method === 'GET') {
+      const platform = String(url.searchParams.get('platform') || '');
+      const suffix = platform ? '?platform=' + encodeURIComponent(platform) : '';
+      return sendJson(res, 200, await adapterFetch('/api/platforms/seen' + suffix));
+    }
+    if (url.pathname === '/api/access' && req.method === 'PUT') {
+      const raw = await readBody(req);
+      let body;
+      try { body = JSON.parse(raw || '{}'); } catch { return sendJson(res, 400, { ok: false, error: 'bad json' }); }
+      return sendJson(res, 200, await adapterFetch('/api/platforms/access', {
+        method: 'PUT',
+        body: JSON.stringify(body),
+      }));
     }
     if (req.method !== 'GET' && req.method !== 'HEAD') {
       return sendJson(res, 405, { ok: false, error: 'read-only console' });
