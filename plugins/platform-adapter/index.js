@@ -366,6 +366,19 @@ export function apply(ctx, config = {}) {
     }
     return platform + ':' + (chatType === 'group' ? 'g' : 'u') + ':' + chatId;
   };
+  const inboundAllowed = (platform, payload) => {
+    const access = getAccess(platform);
+    if (!access) return true;
+    const chatId = String(payload.chat_id || payload.chatId || '');
+    const chatType = taskChatType(payload);
+    const sender = String(payload.sender_id || payload.senderId || '');
+    if (platform === 'wechat' && sender === masterWxid) return true;
+    if (platform === 'qq' && chatType === 'private' && qqOwner() && sender === qqOwner()) return true;
+    if (chatType === 'group' && access.allowAllGroups === true) return true;
+    const list = chatType === 'group' ? access.groups : access.privates;
+    if (!Array.isArray(list) || list.length === 0) return true; // legacy fallback until configured
+    return list.includes(chatId);
+  };
 
   const onlineFile = path.join(cfg.dataDir, 'bot-online.json');
   function readOnline(platform = 'wechat') {
@@ -1968,6 +1981,9 @@ let lastMasterInboundAt = 0;
       payload.platform = platform;
       payload._masterWxid = masterWxid;
       payload._qqOwner = qqOwner();
+      if (!inboundAllowed(platform, payload)) {
+        return sendJson(res, 200, { ok: true, ignored: true, reason: 'access' });
+      }
 
       const msgId = String(payload.msg_id || payload.msgId || '');
       if (msgId && seen.has(msgId)) return sendJson(res, 200, { ok: true, duplicate: true });
