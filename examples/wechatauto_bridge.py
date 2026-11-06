@@ -1399,6 +1399,17 @@ def main():
             return False
         scored.sort(key=lambda x: (x[0], x[1]), reverse=True)
         newest_ok, nhit, h, _c, rows = scored[0]
+        # 多账号时，2 条命中可能只是昵称/最近会话碰巧重叠。宁可拒绝发送，
+        # 也不要把回复从另一个微信号发出去。单窗口不受此限制。
+        MIN_MULTI_WINDOW_HITS = 5
+        if nhit < MIN_MULTI_WINDOW_HITS:
+            ACCOUNT.update(verified=False, hwnd=0,
+                           why="账号证据不足（只对上 %d 条最近会话，门槛 %d）"
+                               % (nhit, MIN_MULTI_WINDOW_HITS))
+            if not quiet:
+                log("账号窗口：拒绝锁定 hwnd=%s（只对上 %d 条最近会话，门槛 %d，避免从别的号发）"
+                    % (h, nhit, MIN_MULTI_WINDOW_HITS))
+            return False
         if sum(1 for candidate in scored if candidate[:2] == scored[0][:2]) != 1:
             ACCOUNT.update(verified=False, hwnd=0,
                            why="多个微信窗口的账号证据相同，不能唯一确认")
@@ -3411,6 +3422,11 @@ def main():
                         _quoted_me = any(str(a) and (str(a) == str(_dn) or str(a) in str(_dn)) for a in aliases)
                     if _quoted_me:
                         content = content + ("（引用了你之前说的话%s）" % (("：" + _refer_text) if _refer_text else ""))
+                    elif _refer_text:
+                        _qwho = str(_dn or "").strip() or "别人"
+                        if _qwho.endswith("@chatroom"):
+                            _qwho = "群友"
+                        content = content + ("（引用了%s的话：%s）" % (_qwho, _refer_text))
             if (not _is_emoji_msg) and (not _quoted_me) and mtype not in ("文本", "语音", "图片", "表情", "动画表情"):
                 if "移出群聊" in content or "移出" in content:
                     dead_chats.add(username)
