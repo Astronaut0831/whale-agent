@@ -29,6 +29,8 @@ export function apply(ctx, config = {}) {
     const text = readPersona(file);
     if (text) agent.ctx.systemPrompt.section({ name: 'whale-persona', order: 100, text });
   };
+  // 只给鲸鲸自己的会话挂人设：GUI 主会话（target）或 chat-sessions 映射的
+  // 微信/QQ 会话。不要 Boolean(sid)，否则 coding/工具 session 也会被注入。
   const allowSession = (sid) => {
     const target = resolveTarget(config);
     if (target && sid && String(sid) === target) return true;

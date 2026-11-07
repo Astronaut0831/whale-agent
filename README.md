@@ -1,100 +1,63 @@
 # 鲸鲸 · Whale
 
-DSH-native 微信陪伴机器人：微信群 / 私聊 / GUI 共用一套人格与长期记忆。
+DSH-native 多端陪伴机器人：微信、QQ、GUI 共用同一套人格与长期记忆。
 
-> 状态：**迁移硬化中，尚未达到“克隆即用”**。
-> 目标平台：Windows 10/11 + DSH 0.2.x + 微信 4.x。
-> 新栈可用；旧 `server.js` 栈保留为 legacy，不参与日常启动。
+> 状态：**自托管，不是克隆即用**。
+> 目标平台：Windows 10/11 + DSH 0.2.x + 微信 4.x + SnowLuma OneBot。
+> 微信走本机 UI/DB bridge；QQ 走个人号 SnowLuma transport-only。
 
 ## 架构
 
 ```text
 微信客户端
-  └─ examples/wechatauto_bridge.py   (UIA + 只读 DB 监听)
-       └─ wechat-adapter :8788
-            ├─ 群聊 ──> headless DSH agent ──> memory-core / memory-tools
-            ├─ 主子私聊 ──> GUI broker :3080 ──> GUI target session
-            └─ outbox ──> bridge ──> 微信
-
-DSH GUI :3080
-  └─ web profile ──> target session ──> persona + memory tools
-
-memory-server :8791
-  ├─ /observe ──> memory-episodes.jsonl
-  ├─ digest worker (5 min) ──> memories.json + digest-state + narrative
-  ├─ /recall ──> memories.json + embedding :8790
-  └─ /memory/backup /restore ──> data/backups
+  └─ examples/wechatauto_bridge.py
+       ├─ 微信 DB 只读监听
+       ├─ UIA 发送
+       └─ POST /webhook/wechat ─┐
+                                │
+QQ（SnowLuma OneBot）           │
+  └─ qq-bridge                  │
+       └─ POST /webhook/qq ─────┤
+                                ▼
+                    platform-adapter :8788
+                       ├─ access / 命令 / 群策略
+                       ├─ gui-broker / headless DSH
+                       └─ outbox → 平台 bridge
+                                │
+                    DSH GUI :3080 / whale-headless
+                       ├─ persona
+                       ├─ memory-core / memory-tools
+                       └─ system-context
+                                │
+                    memory-server :8791
+                    embedding :8790
 ```
 
-详细架构与缺口：
-
-- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
-- [`docs/PROFILES.md`](docs/PROFILES.md)
-- [`docs/GITHUB.md`](docs/GITHUB.md)
-- [`docs/superpowers/specs/2026-11-03-p4-parity.md`](docs/superpowers/specs/2026-11-03-p4-parity.md)
-- [`docs/superpowers/specs/2026-11-03-p1-p4-status.md`](docs/superpowers/specs/2026-11-03-p1-p4-status.md)
-
-## 已可用
-
-- 微信私聊 / 群聊文本
-- 群 @ 与群注意力
-- 图片 / 表情理解（DSH image block）
-- 文件发送 `/sendfile`
-- 后台任务 `/task`
-- 提醒
-- 长期记忆：事实、来源、digest、叙事线、召回
-- 主动关心（模型判断；不再固定死时间窗）
-- 上线 / 下线开关
-- bridge / watchdog / 定时备份自愈
-- GUI target 的 persona + system-context + memory tools
-
-## 已知缺口
-
-- GUI 输入还没有统一走 broker（P3 未完成；不要重新安装固定 target 的 GUI 插件）
-- 非主人私聊、群主动话题、真实 `/dl` 还没有完成全部真实验收
-- 旧 `server.js` / `src/bot.js` / 旧 tests / 旧 web / 旧 deploy scripts 已归档到 `legacy/`，主路径不依赖
-- target/token 已迁移到 `data/runtime.json`（profile 只留空 fallback）；GUI target 的 persona + system-context 已在重启后 system prompt 中验证
-- 备份已补齐 memory 原始文件；仍需定期做真实恢复演练
-- 语音、天气、媒体、旧 Web UI：optional / retired
-
-## 目录
+控制台：
 
 ```text
-plugins/wechat-adapter/       新微信适配器（命令、群策略、broker、headless）
-plugins/whale-memory-core/    观察 turn/end，写入 memory-server
-plugins/whale-memory-tools/   注册 memory_recall / add / correct
-plugins/whale-system-context/ 规矩/自省 → systemPrompt
-plugins/whale-persona/        人设 → systemPrompt
-tools/start-all.ps1           幂等启动
-tools/adapter-watchdog.ps1    进程级自愈
-tools/memory-server.js        记忆 HTTP 服务
-tools/backup-memory.ps1       每日快照
-src/memories.js               事实库 / 召回 / audience
-src/digestCore.js             摘要与事实抽取
-examples/wechatauto_bridge.py 微信桥
-docs/                         架构、运行、历史记录
-legacy 文件                   旧 server.js / bot.js / old web（不参与启动）
+http://127.0.0.1:3100
+监控 / access allowlist / 平台上下线 / 全局人设
 ```
 
-## 环境要求
+详细结构、坑位和文件速查见 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)。
 
-- Windows 10/11（微信 UIA / 数据库监听）
-- Node.js 22+
-- Python 3.10+（bridge）
-- DSH CLI 0.2.x
-- 微信 4.x，且与本机登录账号匹配
-- 可选：本地 embedding 服务 `:8790`（缺失时召回退回关键词）
+## 已实现
 
-如果微信或 Python 不在默认路径：
-
-```powershell
-$env:WHALE_WECHAT_EXE = "C:\Path\To\Weixin.exe"
-$env:WHALE_PYTHON = "C:\Path\To\python.exe"
-```
+- 微信私聊 / 群聊文本、图片、表情、文件
+- 微信快速连发合并（900ms，同会话；群聊仅同发送者）
+- 群 @ / 群注意力 / 静默策略
+- QQ 个人号（SnowLuma OneBot → transport-only）
+- 主人 QQ 私聊映射到微信主人记忆 scope
+- 长期记忆：episode、事实、来源、digest、叙事线、召回
+- 人格只注入鲸鲸会话，不污染 coding / 工具会话
+- 提醒、主动关心、群话题
+- 动态 `/help`；控制台管理 `/listen`、`/online`、`/offline`、`/persona`
+- 官方 QQ 插件已停用，避免第二套 agent
 
 ## 快速开始
 
-1. 复制配置并填值：
+### 1. 配置
 
 ```powershell
 Copy-Item config.example.json config.json
@@ -103,32 +66,57 @@ Copy-Item config.example.json config.json
 至少填写：
 
 - `deepseek.apiKey`
-- `gateway.wechat.inboundToken`（bridge 与 adapter 共用）
+- `gateway.wechat.inboundToken`
 - `wechat.listen.groups` / `privates`
 - `persona.master.wxids`
 
-2. 准备 DSH profiles（本仓库不含机器专属 profile）：
+`config.json`、`data/`、profile、数据库和日志都不入库。
 
-- `whale-agent`：加载 `@whale/wechat-adapter`
-- `whale-headless`：persona + memory-core + memory-tools + system-context
-- `whale-headless-task`：同上，但开启 workspace 文件工具
-- `web`：GUI persona + memory-core + memory-tools（target session）
+### 2. DSH profiles
 
-profile 示例与安装步骤见 [`docs/PROFILES.md`](docs/PROFILES.md)。
+本仓库不包含机器专属 profile。需要准备：
 
-3. 启动服务：
+```text
+whale-agent          platform-adapter :8788
+whale-headless       普通 headless：persona + memory
+whale-headless-task  带 workspace 工具的 headless
+web                  DSH GUI :3080
+```
+
+示例见 [`docs/PROFILES.md`](docs/PROFILES.md)。
+
+### 3. 启动
 
 ```powershell
 npm start
 ```
 
-4. 打开 GUI：
+实际入口是 [`tools/start-all.ps1`](tools/start-all.ps1)。启动顺序：
 
-```powershell
-dsh --profile web --port 3080 --no-open
+```text
+GUI :3080 → adapter :8788 → memory :8791 → 微信 bridge
 ```
 
-5. 健康检查：
+QQ 需要另起 SnowLuma 和 `qq-bridge`（默认在 `D:\dsh-workspace\research\qq-bridge`）：
+
+```text
+D:\SnowLuma\launcher.bat           # :3000/:3001/:5099
+cd D:\dsh-workspace\research\qq-bridge
+npm start                          # transport-only
+```
+
+### 4. 控制台
+
+```powershell
+cd tools/platform-console
+npm install
+npm run build
+npm start
+```
+
+打开 `http://127.0.0.1:3100`。
+
+### 5. 健康检查
 
 ```powershell
 npm run doctor
@@ -137,18 +125,34 @@ npm run doctor
 ## 常用命令
 
 ```text
-/help                    命令
-/status                  状态
-/offline /online         全局下线 / 上线
-/task ...                后台任务
-/sendfile <path>         发文件
-/dl <url>                下载到 workspace
-/remind ...              提醒
-/care on|off             主动关心
+/help                    动态命令列表
+/status                  运行状态（主人）
+/mute /unmute            群闭麦
+/talk 少|正常|多          群说话频率
+/corpus on|off           群语料
 /proactive on|off        群主动话题
-/facts ...               长期事实
-/backup ...              记忆快照
+/care on|off             主动关心
+/remind                  提醒
+/behavior /pref          行为与规矩
+/facts /memory           长期记忆
+/backup                  记忆快照
+/task                    后台任务
+/set /digest /usage      配置 / 摘要 / 用量
 ```
+
+控制台专有：
+
+```text
+/listen /online /offline /persona
+```
+
+已移除：
+
+```text
+/agent /ls /sendfile /dl /run
+```
+
+文件/脚本操作交给 agent 工具；不再通过聊天命令执行。
 
 ## 测试
 
@@ -156,26 +160,30 @@ npm run doctor
 npm test
 ```
 
-只跑新栈：adapter、memory、context、GUI-input 测试。
-旧栈测试仍保留：
+当前维护测试：
 
-```powershell
-npm run legacy:test
+```text
+97 项通过
 ```
 
-## 安全
+CI：GitHub Actions，Ubuntu + Windows，Node 24。
 
-- `config.json`、`data/`、profile、日志、数据库均不入库
-- `/api/gui/input` 仅 loopback
-- `/run` 仅主人，必须 `--yes`，限 workspace、15 秒
-- `/dl` 仅主人，http/https，20 MB
-- 默认 headless 无文件工具；task 专用 profile 才有
-- 不要重新安装 `whale-fixed-session` / `whale-gui-input` 到默认 web profile
+## 安全与边界
 
-## Legacy
+- 个人微信 / QQ 自动化都不是官方接口，有账号风险；只用小号测试。
+- 微信 UIA 发送仍可能在不可靠窗口上回退前台；多账号时未确认窗口会拒绝发送。
+- 控制台只绑定 `127.0.0.1`，没有额外鉴权；不要暴露到公网。
+- QQ allowlist 默认拒绝，需在控制台显式允许群/私聊。
+- 记忆按 scope 隔离：群与群、群与私聊不混；主人微信/QQ 私聊共享。
 
-旧 v3 README 在 [`docs/legacy/README-v3.md`](docs/legacy/README-v3.md)，迁移残留清单在 [`legacy/README.md`](legacy/README.md)。
-旧入口仍可通过 `npm run legacy:start` 手动启动，**日常不要运行**；`start-all` 不再启动 8787。
+## 文档
+
+- [架构](docs/ARCHITECTURE.md)
+- [Profiles](docs/PROFILES.md)
+- [微信接入](docs/接入微信.md)
+- [Gateway](docs/GATEWAY.md)
+- [记忆设计](docs/memory-vs-brain.md)
+- [GitHub 发布](docs/GITHUB.md)
 
 ## License
 
