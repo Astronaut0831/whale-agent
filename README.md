@@ -107,6 +107,8 @@ npm start                          # transport-only
 
 ### 4. 控制台
 
+`npm start` 已经会顺带拉起控制台。手动启动只用于调试：
+
 ```powershell
 cd tools/platform-console
 npm install

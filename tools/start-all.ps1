@@ -140,6 +140,24 @@ if (-not (Find-Bridge)) {
   Start-Sleep -Seconds 6
 }
 
+# 5c) Platform console on :3100
+if (-not (Test-Url 'http://127.0.0.1:3100/api/status')) {
+  $consoleDir = Join-Path $Root 'tools\platform-console'
+  if (Test-Path (Join-Path $consoleDir 'dist\index.html')) {
+    $out = Join-Path $Root 'data\platform-console.log'
+    $cmd = 'node server.mjs >> "' + $out + '" 2>&1'
+    $p = Start-Process -FilePath 'cmd.exe' -ArgumentList '/c', $cmd -WorkingDirectory $consoleDir -WindowStyle Hidden -PassThru
+    Write-Log "console: started (pid $($p.Id))"
+    $started++
+    for ($i = 0; $i -lt 15; $i++) {
+      Start-Sleep -Seconds 1
+      if (Test-Url 'http://127.0.0.1:3100/api/status') { break }
+    }
+  } else {
+    Write-Log 'console: dist missing, run npm run build in tools/platform-console'
+  }
+}
+
 # 5b) watchdog: guards adapter / memory / bridge
 $wd = Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" -ErrorAction SilentlyContinue |
   Where-Object { $_.CommandLine -like '*adapter-watchdog.ps1*' } | Select-Object -First 1
@@ -159,5 +177,6 @@ if ($started -gt 0 -or -not $Quiet) {
   $memoryUp = Test-Port 8791
   # Old 8787 is retired: never probe it in the normal launcher.
   $legacyUp = $false
-  Write-Log ("status wechat={0} embed={1} adapter={2} memory={3} bridge={4} legacy={5}" -f $wechatUp, $embedUp, $adapterUp, $memoryUp, $bridgeUp, $legacyUp)
+  $consoleUp = Test-Url 'http://127.0.0.1:3100/api/status'
+  Write-Log ("status wechat={0} embed={1} adapter={2} memory={3} bridge={4} console={5} legacy={6}" -f $wechatUp, $embedUp, $adapterUp, $memoryUp, $bridgeUp, $consoleUp, $legacyUp)
 }
