@@ -2,7 +2,7 @@
 
 这里存放从新栈移出的旧实现，仅保留用于历史审计和必要时用 git 历史恢复。**这些文件不是运行路径，也不保证可启动。**
 
-- `server.js`：旧 HTTP 服务归档；根目录已不再有 `server.js`。
+- `server.js`：旧 HTTP 服务归档已从当前树移除；需要时从 git 历史恢复（旧入口不在运行路径）。
 - `src-bot.js`：旧 `src/bot.js` 归档。
 - `tests/`：旧栈测试归档；新 CI 只跑 `npm test`。
 - `src/`：已退役的 behavior / bilibili / care / corpus / links / proactive / tasks / vision / selfedit；主路径使用 `plugins/lib/` 的共享实现或 DSH 自带能力。
@@ -14,7 +14,7 @@
 新栈入口：
 
 ```text
-adapter: plugins/wechat-adapter
+adapter: plugins/platform-adapter
 DSH profiles: docs/PROFILES.md
 start: npm start
 tests: npm test
