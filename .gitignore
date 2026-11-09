@@ -1,6 +1,7 @@
 # 运行时数据：包含 API Key、聊天记录、人设、词库、日志、微信数据库快照，绝不入库
 data/
 data.old/
+personas/
 config.json
 config.json.*
 wechatauto_logs/
