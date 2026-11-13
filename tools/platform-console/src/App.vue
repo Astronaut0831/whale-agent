@@ -1,13 +1,17 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue';
 import { darkTheme, NButton, NConfigProvider, NGlobalStyle, NInput, NTag, useOsTheme } from 'naive-ui';
-import { fetchAccess, fetchLogs, fetchOnline, fetchPersona, fetchSeen, fetchStatus, saveAccess, saveOnline, savePersona, type AccessResponse, type OnlineState, type SeenResponse, type Status } from './api';
+import { fetchAccess, fetchLogs, fetchOnline, fetchPersona, fetchSeen, fetchServices, fetchStatus, saveAccess, saveOnline, savePersona, startConsoleService, type AccessResponse, type OnlineState, type SeenResponse, type ServicesState, type Status } from './api';
 
 const osTheme = useOsTheme();
 const theme = computed(() => (osTheme.value === 'dark' ? darkTheme : null));
 
 const status = ref<Status | null>(null);
 const error = ref('');
+const services = ref<ServicesState | null>(null);
+const serviceError = ref('');
+const starting = ref('');
+const bridgeConfirmed = ref(false);
 const logs = ref<string[]>([]);
 const logSource = ref('adapter');
 const loading = ref(false);
@@ -191,6 +195,27 @@ async function loadStatus() {
   }
 }
 
+async function loadServices() {
+  try {
+    services.value = await fetchServices();
+  } catch (e) {
+    serviceError.value = String((e as Error)?.message || e);
+  }
+}
+
+async function startOne(name: 'qq-transport' | 'wechat-bridge') {
+  starting.value = name;
+  serviceError.value = '';
+  try {
+    await startConsoleService(name, name === 'wechat-bridge' ? { confirmBotWindow: bridgeConfirmed.value } : {});
+    await loadServices();
+  } catch (e) {
+    serviceError.value = String((e as Error)?.message || e);
+  } finally {
+    starting.value = '';
+  }
+}
+
 async function loadLogs() {
   try {
     logs.value = await fetchLogs(logSource.value, 120);
@@ -206,9 +231,9 @@ async function selectSource(id: string) {
 
 async function refresh() {
   if (view.value === 'access') {
-    await Promise.all([loadStatus(), loadAccess()]);
+    await Promise.all([loadStatus(), loadAccess(), loadServices()]);
   } else {
-    await Promise.all([loadStatus(), loadLogs()]);
+    await Promise.all([loadStatus(), loadLogs(), loadServices()]);
   }
 }
 
@@ -220,7 +245,7 @@ async function switchView(next: 'monitor' | 'access') {
 onMounted(async () => {
   await refresh();
   timer = window.setInterval(() => {
-    if (!document.hidden) void loadStatus();
+    if (!document.hidden) { void loadStatus(); void loadServices(); }
   }, 5000);
 });
 
@@ -247,6 +272,7 @@ onUnmounted(() => {
       </header>
 
       <p v-if="error" class="empty">状态读取失败：{{ error }}</p>
+      <p v-if="serviceError" class="empty">服务操作失败：{{ serviceError }}</p>
 
       <section v-if="view === 'monitor'" class="grid">
         <article class="card wide">
@@ -281,6 +307,16 @@ onUnmounted(() => {
             {{ qq?.nickname || 'SnowLuma 个人号' }} · 最后入站 {{ ago(qq?.lastInboundAt) }} · 最后出站 {{ ago(qq?.lastOutboundAt) }}
           </p>
           <p v-if="qq?.lastError" class="meta">最近错误：{{ qq.lastError }}</p>
+          <div class="header-actions" style="margin-top: 10px">
+            <NButton
+              size="small"
+              type="primary"
+              :disabled="!services?.snowluma.onebot || services?.qqTransport.running"
+              :loading="starting === 'qq-transport'"
+              @click="startOne('qq-transport')"
+            >启动 QQ transport</NButton>
+            <span class="meta">{{ services?.qqTransport.running ? '进程已在运行' : services?.snowluma.onebot ? 'OneBot 在线，可以启动' : '等待 OneBot 3000/3001' }}</span>
+          </div>
         </article>
 
         <article class="card wide">
@@ -290,6 +326,21 @@ onUnmounted(() => {
             {{ status?.wechat.alive ? '进程在线' : '进程离线' }}
           </div>
           <p class="meta">PID {{ status?.wechat.pid || '—' }} · ready {{ status?.wechat.readyAt || '—' }}</p>
+          <label class="check-row">
+            <input v-model="bridgeConfirmed" type="checkbox" />
+            已只保留机器人号窗口
+          </label>
+          <div class="header-actions" style="margin-top: 10px">
+            <NButton
+              size="small"
+              type="primary"
+              :disabled="!bridgeConfirmed || services?.wechatBridge.running"
+              :loading="starting === 'wechat-bridge'"
+              @click="startOne('wechat-bridge')"
+            >启动微信 bridge</NButton>
+            <span v-if="services?.wechatBridge.stopFlag" class="meta">当前被 stop flag 挂起</span>
+            <span v-else-if="services?.wechatBridge.running" class="meta">进程已在运行</span>
+          </div>
         </article>
 
         <article class="card full">

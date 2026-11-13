@@ -9,6 +9,7 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { getServices, startService } from './services.mjs';
 
 const DIR = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(DIR, '..', '..');
@@ -189,6 +190,17 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === '/api/status') {
       return sendJson(res, 200, await getStatus());
     }
+    if (url.pathname === '/api/services' && req.method === 'GET') {
+      return sendJson(res, 200, await getServices({ root: ROOT, qqRoot: QQ_ROOT, checkPort }));
+    }
+    const serviceStart = url.pathname.match(/^\/api\/services\/([a-z-]+)\/start$/);
+    if (serviceStart && req.method === 'POST') {
+      const raw = await readBody(req);
+      let body = {};
+      try { body = JSON.parse(raw || '{}'); } catch { return sendJson(res, 400, { ok: false, error: 'bad json' }); }
+      const result = await startService(serviceStart[1], { root: ROOT, qqRoot: QQ_ROOT, checkPort }, body);
+      return sendJson(res, result.status, result);
+    }
     if (url.pathname === '/api/logs') {
       const source = String(url.searchParams.get('source') || 'adapter');
       const file = LOG_FILES[source];
@@ -259,6 +271,6 @@ const server = http.createServer(async (req, res) => {
 });
 
 server.listen(PORT, HOST, () => {
-  console.log(`[console] http://${HOST}:${PORT} (read-only)`);
+  console.log(`[console] http://${HOST}:${PORT} (local)`);
   console.log(`[console] adapter=${ADAPTER_URL} qq=${QQ_ROOT} snowluma=${SNOWLUMA_URL}`);
 });

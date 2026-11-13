@@ -116,5 +116,32 @@ export async function savePersona(persona: string): Promise<void> {
   if (!r.ok) throw new Error('save persona HTTP ' + r.status);
 }
 
+export interface ServicesState {
+  snowluma: { webui: boolean; onebot: boolean };
+  qqTransport: { running: boolean; lastError: string };
+  wechatBridge: { running: boolean; ready: boolean; stopFlag: boolean };
+}
+
+export async function fetchServices(): Promise<ServicesState> {
+  const r = await fetch('/api/services');
+  if (!r.ok) throw new Error('services HTTP ' + r.status);
+  return r.json();
+}
+
+export async function startConsoleService(
+  name: 'qq-transport' | 'wechat-bridge',
+  body: Record<string, unknown> = {},
+): Promise<{ ok: boolean; error?: string; alreadyRunning?: boolean }> {
+  const r = await fetch('/api/services/' + name + '/start', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  let data: { ok?: boolean; error?: string; alreadyRunning?: boolean } = {};
+  try { data = await r.json(); } catch { /* ignore */ }
+  if (!r.ok) throw new Error(data.error || ('start HTTP ' + r.status));
+  return { ok: Boolean(data.ok), alreadyRunning: data.alreadyRunning };
+}
+
 
 
