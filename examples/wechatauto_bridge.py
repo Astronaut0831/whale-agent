@@ -172,6 +172,8 @@ try:
     KEYBOARD_FALLBACK = bool(_wechat.get("keyboardFallback", True))
     # 后台发送：不抢前台直接发（实测最小化/被遮挡也能发）。false = 每次先把微信拉到前台
     BACKGROUND_SEND = bool(_wechat.get("backgroundSend", True))
+    # 后台失败时是否允许把微信拉到前台重试；false = 宁可排队也不抢前台
+    FOREGROUND_FALLBACK = bool(_wechat.get("foregroundFallback", True))
     # 多账号（同时登着大号 + 小号）：启动时钉死在 wechat.account 指定的那个号上，
     # 发送前再确认「要发消息的那个窗口就是这个号」；认不出来宁可不发，也不从别的号发。
     # accountGuard=false 只用于「本机确实只登一个号、但窗口读取时好时坏」的兜底。
@@ -244,7 +246,7 @@ def reload_config(path=None):
     返回是否真的重新加载了。
     """
     global GAME_TOKENS, AWAY_NOTICE, RETURN_NOTICE, QUEUED_MAX_AGE, QUEUED_MAX_CHATS
-    global QUOTE_REPLY, KEYBOARD_FALLBACK, BACKGROUND_SEND, LOW_BATTERY_PCT, GOODNIGHT_TEXT
+    global QUOTE_REPLY, KEYBOARD_FALLBACK, BACKGROUND_SEND, FOREGROUND_FALLBACK, LOW_BATTERY_PCT, GOODNIGHT_TEXT
     global ACCOUNT_GUARD, WINDOW_HWND, STICKER_TEST_ON
     global SHARE_ENABLED, SHARE_EVERY, CARE_ENABLED, CARE_QUIET_MIN
     global STALE_AFTER, SYSTEM_SENDER_NAMES, BASE_SYSTEM_SENDERS, MASTER_WXID
@@ -274,6 +276,7 @@ def reload_config(path=None):
     QUOTE_REPLY = bool(w.get("quoteReply", False))
     KEYBOARD_FALLBACK = bool(w.get("keyboardFallback", True))
     BACKGROUND_SEND = bool(w.get("backgroundSend", True))
+    FOREGROUND_FALLBACK = bool(w.get("foregroundFallback", True))
     STICKER_TEST_ON = _as_bool(((cfg.get("features") or {}).get("stickers", False)), False)
     ACCOUNT_GUARD = bool(w.get("accountGuard", True))
     try:
@@ -1760,6 +1763,9 @@ def main():
                         return True
                 except Exception as e:                 # noqa: BLE001
                     log("后台发送异常，改走前台重试：", repr(e))
+                if not FOREGROUND_FALLBACK:
+                    log("后台发送没成功，foregroundFallback=false，不抢前台")
+                    return False
                 log("后台发送没成功，把微信拉到前台再试一次")
                 return force_send_foreground(fn)
             return force_send_foreground(fn)
@@ -2925,6 +2931,10 @@ def main():
                     except Exception:
                         pass
             if not path:
+                _allow_ui_shot = bool(((cfg.get("vision") or {}).get("uiScreenshot", False)))
+                if not _allow_ui_shot:
+                    log("图片 original/mid 取不到，uiScreenshot=false，跳过界面截图")
+                    return None, ""
                 log("图片 original/mid 都没取到（%s/%s），退到界面截图" % (user, lid))
                 # 最后兜底：直接截聊天里最后一条图气泡（不依赖 .dat 解密）
                 try:

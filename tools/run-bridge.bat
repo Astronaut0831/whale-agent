@@ -2,6 +2,10 @@
 setlocal
 cd /d "%~dp0.."
 if not exist "data" mkdir "data"
+if exist "data\bridge-stop.flag" (
+  echo [%date% %time%] bridge stopped by flag (pre-start) >> "data\bridge-restart.log"
+  goto :eof
+)
 set "WHALE_BOT_URL=http://127.0.0.1:8788/webhook/wechat"
 set "PYTHON=%WHALE_PYTHON%"
 if not defined PYTHON set "PYTHON=%LOCALAPPDATA%\Programs\Python\Python312\python.exe"
