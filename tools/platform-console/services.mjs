@@ -77,6 +77,12 @@ export async function getServices({ root, qqRoot, checkPort }) {
   };
 }
 
+function bridgePython() {
+  const explicit = String(process.env.WHALE_PYTHON || '').trim();
+  if (explicit) return explicit;
+  return path.join(process.env.LOCALAPPDATA || '', 'Programs', 'Python', 'Python312', 'python.exe');
+}
+
 function launch(command, args, options) {
   const child = spawn(command, args, {
     ...options,
@@ -102,8 +108,15 @@ export async function startService(name, ctx, body = {}) {
     if (name === 'qq-transport') {
       launch('cmd.exe', ['/c', 'npm start'], { cwd: ctx.qqRoot });
     } else if (name === 'wechat-bridge') {
+      const python = bridgePython();
+      if (!fs.existsSync(python)) {
+        return { ok: false, status: 500, error: '找不到 Python：' + python };
+      }
       fs.rmSync(path.join(ctx.root, 'data', 'bridge-stop.flag'), { force: true });
-      launch('cmd.exe', ['/c', 'tools\\run-bridge.bat'], { cwd: ctx.root });
+      launch(python, [path.join(ctx.root, 'examples', 'wechatauto_bridge.py')], {
+        cwd: ctx.root,
+        env: { ...process.env, WHALE_BOT_URL: 'http://127.0.0.1:8788/webhook/wechat' },
+      });
     }
     try {
       fs.appendFileSync(
