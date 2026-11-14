@@ -162,6 +162,11 @@ try:
         STALE_AFTER = float(_stale)
     _wechat = _cfg.get("wechat") or {}
     GAME_TOKENS = [str(x).lower() for x in (_wechat.get("gameWhitelist") or []) if str(x).strip()]
+    USER_ACTIVE_PAUSE = bool(_wechat.get("pauseWhileUserActive", True))
+    try:
+        USER_ACTIVE_SEC = max(1.0, float(_wechat.get("userActiveSec", 15)))
+    except Exception:
+        USER_ACTIVE_SEC = 15.0
     AWAY_NOTICE = bool(_wechat.get("awayNotice", True))
     RETURN_NOTICE = bool(_wechat.get("returnNotice", True))
     QUEUED_MAX_AGE = float(_wechat.get("queuedMaxAgeSec", 300))
@@ -245,7 +250,7 @@ def reload_config(path=None):
 
     返回是否真的重新加载了。
     """
-    global GAME_TOKENS, AWAY_NOTICE, RETURN_NOTICE, QUEUED_MAX_AGE, QUEUED_MAX_CHATS
+    global GAME_TOKENS, USER_ACTIVE_PAUSE, USER_ACTIVE_SEC, AWAY_NOTICE, RETURN_NOTICE, QUEUED_MAX_AGE, QUEUED_MAX_CHATS
     global QUOTE_REPLY, KEYBOARD_FALLBACK, BACKGROUND_SEND, FOREGROUND_FALLBACK, LOW_BATTERY_PCT, GOODNIGHT_TEXT
     global ACCOUNT_GUARD, WINDOW_HWND, STICKER_TEST_ON
     global SHARE_ENABLED, SHARE_EVERY, CARE_ENABLED, CARE_QUIET_MIN
@@ -265,6 +270,11 @@ def reload_config(path=None):
     except Exception:
         pass
     GAME_TOKENS = [str(x).lower() for x in (w.get("gameWhitelist") or []) if str(x).strip()]
+    USER_ACTIVE_PAUSE = bool(w.get("pauseWhileUserActive", True))
+    try:
+        USER_ACTIVE_SEC = max(1.0, float(w.get("userActiveSec", 15)))
+    except Exception:
+        USER_ACTIVE_SEC = 15.0
     AWAY_NOTICE = bool(w.get("awayNotice", True))
     RETURN_NOTICE = bool(w.get("returnNotice", True))
     try:
@@ -1513,6 +1523,27 @@ def main():
             pass
         return False
 
+    def user_active():
+        """最近 userActiveSec 秒内有键鼠输入吗？只读系统空闲时间，不碰微信/鼠标。"""
+        if not USER_ACTIVE_PAUSE:
+            return False
+        try:
+            import ctypes
+            from ctypes import wintypes
+
+            class _LastInputInfo(ctypes.Structure):
+                _fields_ = [("cbSize", wintypes.UINT), ("dwTime", wintypes.DWORD)]
+
+            info = _LastInputInfo()
+            info.cbSize = ctypes.sizeof(info)
+            if not ctypes.windll.user32.GetLastInputInfo(ctypes.byref(info)):
+                return False
+            now32 = int(ctypes.windll.kernel32.GetTickCount()) & 0xFFFFFFFF
+            idle_ms = (now32 - int(info.dwTime)) & 0xFFFFFFFF
+            return idle_ms < int(USER_ACTIVE_SEC * 1000)
+        except Exception:
+            return False
+
     def foreground_is_fullscreen():
         """前台是不是「真全屏」程序（全屏游戏、全屏视频）——这时别抢焦点，先把回复排着。
 
@@ -1751,7 +1782,7 @@ def main():
              这样你在用电脑时最多看到它闪一下。
         把 wechat.backgroundSend 设成 false 就退回以前的「每次先抢前台、发完不管」。
         """
-        if game_running():
+        if game_running() or user_active():
             return False
         SEND_STATE["active"] = True
         SEND_STATE["start"] = time.time()
@@ -2348,7 +2379,7 @@ def main():
 
     def sticker_activity_allowed(username=""):
         try:
-            return not (AWAY["on"] or away_active() or game_running() or foreground_is_fullscreen()
+            return not (AWAY["on"] or away_active() or game_running() or user_active() or foreground_is_fullscreen()
                         or (username and (username in dead_chats or not group_is_alive(username))))
         except Exception:
             return False
@@ -2688,10 +2719,10 @@ def main():
             dead_chats.add(chat_username)
             log("群里已经没有我了（被移出？），以后跳过：", chat_display_name)
             return False
-        if not force and (AWAY["on"] or away_active() or game_running() or foreground_is_fullscreen()):
+        if not force and (AWAY["on"] or away_active() or game_running() or user_active() or foreground_is_fullscreen()):
             with pending_lock:
                 pending_replies[chat_username or chat_display_name] = (text, chat_display_name, chat_username, time.time())
-            log("你在游戏/全屏程序里，回复先排队，等你退出再发：", chat_display_name)
+            log("你在用电脑/游戏/全屏里，回复先排队，等空闲再发：", chat_display_name)
             return True
         # 账号闸：认不出「哪个窗口是小号」就不发（放在排队判断之后，免得游戏里直接丢消息）
         if not account_send_allowed("发送"):
@@ -2699,10 +2730,10 @@ def main():
         with send_lock:
             if not sticker_quarantine_allows(chat_username, chat_display_name):
                 return False
-            if not force and (AWAY["on"] or away_active() or game_running() or foreground_is_fullscreen()):
+            if not force and (AWAY["on"] or away_active() or game_running() or user_active() or foreground_is_fullscreen()):
                 with pending_lock:
                     pending_replies[chat_username or chat_display_name] = (text, chat_display_name, chat_username, time.time())
-                log("游戏/全屏中，先排队：", chat_display_name)
+                log("游戏/全屏/你在用电脑，先排队：", chat_display_name)
                 return True
             with gui_lock:
                 if gui is None:
@@ -2838,10 +2869,10 @@ def main():
             return False
         if chat_username and (chat_username in dead_chats or not group_is_alive(chat_username)):
             return False
-        if AWAY["on"] or away_active() or game_running() or foreground_is_fullscreen():
+        if AWAY["on"] or away_active() or game_running() or user_active() or foreground_is_fullscreen():
             with pending_lock:
                 pending_replies[chat_username or chat_display_name] = (text, chat_display_name, chat_username, time.time())
-            log("你在游戏/全屏程序里，@ 回复先排队：", chat_display_name)
+            log("你在用电脑/游戏/全屏里，@ 回复先排队：", chat_display_name)
             return True
         # 账号闸：@ 人要点开成员列表，窗口不对就会在别的号里 @ 别人
         if not account_send_allowed("@ 成员"):
@@ -3957,7 +3988,7 @@ def main():
                 continue
             if time.time() - last < SHARE_EVERY * 60:
                 continue
-            if game_running() or away_active() or foreground_is_fullscreen():
+            if game_running() or user_active() or away_active() or foreground_is_fullscreen():
                 continue
             target = recent_chats(limit=1, within=7200)
             if not target:
@@ -4025,7 +4056,7 @@ def main():
             time.sleep(60)
             if not CARE_ENABLED:
                 continue
-            if game_running() or away_active() or foreground_is_fullscreen():
+            if game_running() or user_active() or away_active() or foreground_is_fullscreen():
                 continue
             st = load_state()
             last_ts = float(st.get("lastTs") or 0)
@@ -4137,6 +4168,9 @@ def main():
             elif not running and AWAY["on"]:
                 AWAY["on"] = False
                 log("游戏已退出，补发排队消息")
+                if user_active():
+                    log("游戏已退出，但你还在用电脑，继续排队等空闲")
+                    continue
                 with pending_lock:
                     items = list(pending_replies.values())
                     pending_replies.clear()
@@ -4258,7 +4292,7 @@ def main():
     def flush_pending():
         while True:
             time.sleep(2)
-            if AWAY["on"] or away_active() or foreground_is_fullscreen():
+            if AWAY["on"] or away_active() or user_active() or foreground_is_fullscreen():
                 continue
             with pending_lock:
                 if not pending_replies:
