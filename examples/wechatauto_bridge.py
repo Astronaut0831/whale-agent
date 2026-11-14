@@ -1209,7 +1209,7 @@ def main():
     dead_chats = set()
     fail_streak = {}
     self_wxid = db.wxid
-    pending_replies = {}
+    pending_replies = []
     SEND_STATE = {"active": False, "start": 0.0}
     pending_lock = threading.Lock()
     AWAY = {"on": False}
@@ -2721,7 +2721,7 @@ def main():
             return False
         if not force and (AWAY["on"] or away_active() or game_running() or user_active() or foreground_is_fullscreen()):
             with pending_lock:
-                pending_replies[chat_username or chat_display_name] = (text, chat_display_name, chat_username, time.time())
+                pending_replies.append((text, chat_display_name, chat_username, time.time()))
             log("你在用电脑/游戏/全屏里，回复先排队，等空闲再发：", chat_display_name)
             return True
         # 账号闸：认不出「哪个窗口是小号」就不发（放在排队判断之后，免得游戏里直接丢消息）
@@ -2732,7 +2732,7 @@ def main():
                 return False
             if not force and (AWAY["on"] or away_active() or game_running() or user_active() or foreground_is_fullscreen()):
                 with pending_lock:
-                    pending_replies[chat_username or chat_display_name] = (text, chat_display_name, chat_username, time.time())
+                    pending_replies.append((text, chat_display_name, chat_username, time.time()))
                 log("游戏/全屏/你在用电脑，先排队：", chat_display_name)
                 return True
             with gui_lock:
@@ -2871,7 +2871,7 @@ def main():
             return False
         if AWAY["on"] or away_active() or game_running() or user_active() or foreground_is_fullscreen():
             with pending_lock:
-                pending_replies[chat_username or chat_display_name] = (text, chat_display_name, chat_username, time.time())
+                pending_replies.append((text, chat_display_name, chat_username, time.time()))
             log("你在用电脑/游戏/全屏里，@ 回复先排队：", chat_display_name)
             return True
         # 账号闸：@ 人要点开成员列表，窗口不对就会在别的号里 @ 别人
@@ -3946,7 +3946,7 @@ def main():
                         if fp and os.path.exists(fp):
                             sent = bool(send_file(fp, name, cid))
                     else:
-                        sent = bool(send_text(str(it.get("text") or ""), name, cid, force=True))
+                        sent = bool(send_text(str(it.get("text") or ""), name, cid, force=False))
                 except Exception as e:
                     log("outbox 发送异常：", str(e)[:80])
                 (ok_ids if sent else bad_ids).append(it.get("id"))
@@ -3955,6 +3955,7 @@ def main():
                     LOCAL_HTTP.post(obase + "/api/bridge/outbox/ack", json={"ids": [it.get("id")], "ok": bool(sent)}, timeout=10)
                 except Exception:
                     pass
+                time.sleep(0.8)
             try:
                 if ok_ids:
                     LOCAL_HTTP.post(obase + "/api/bridge/outbox/ack", json={"ids": ok_ids, "ok": True}, timeout=10)
@@ -4172,7 +4173,7 @@ def main():
                     log("游戏已退出，但你还在用电脑，继续排队等空闲")
                     continue
                 with pending_lock:
-                    items = list(pending_replies.values())
+                    items = list(pending_replies)
                     pending_replies.clear()
                 now = time.time()
                 fresh = [x for x in items if now - x[3] <= QUEUED_MAX_AGE]
@@ -4182,6 +4183,7 @@ def main():
                     log("排队里有 %d 条已经太旧（>%ds），不补发" % (dropped, int(QUEUED_MAX_AGE)))
                 for text, target, uname, _ts in fresh:
                     send_text(text, target, uname, force=True)
+                    time.sleep(0.8)
                 if RETURN_NOTICE:
                     try:
                         notify_back()
@@ -4297,13 +4299,14 @@ def main():
             with pending_lock:
                 if not pending_replies:
                     continue
-                items = list(pending_replies.values())
+                items = list(pending_replies)
                 pending_replies.clear()
             now = time.time()
             fresh = [x for x in items if now - x[3] <= QUEUED_MAX_AGE][-QUEUED_MAX_CHATS:]
             for text, target, uname, _ts in fresh:
                 log("补发排队消息 →", target)
                 send_text(text, target, uname, force=True)
+                time.sleep(0.8)
 
     def listener_alive():
         """收消息的轮询线程是否还活着。"""
