@@ -1238,19 +1238,27 @@ let lastMasterInboundAt = 0;
     const _now = new Date();
     const _hms = [_now.getHours(), _now.getMinutes(), _now.getSeconds()]
       .map((n) => String(n).padStart(2, '0')).join(':');
+    const _stamp = _now.getFullYear() + '-' + String(_now.getMonth() + 1).padStart(2, '0') + '-' + String(_now.getDate()).padStart(2, '0') + ' ' + _hms;
+    const _fmtGroupTime = (ts) => {
+      const d = new Date(Number(ts));
+      if (!Number.isFinite(d.getTime())) return '[--:--]';
+      const hm = [d.getHours(), d.getMinutes()].map((n) => String(n).padStart(2, '0')).join(':');
+      return d.toDateString() === _now.toDateString() ? '[' + hm + ']' : '[' + (d.getMonth() + 1) + '/' + d.getDate() + ' ' + hm + ']';
+    };
     const _src = chatType === 'group'
       ? '[群聊 ' + chatId + ']'
       : '[私聊 ' + (sender || chatId) + ']';
     const _who = String(payload.sender_name || payload.senderName || (chatType === 'group' ? '群友' : sender) || '对方');
-    let promptText = _src + ' ' + _hms + ' ' + _who + '：' + text;
+    let promptText = _src + ' ' + _stamp + ' ' + _who + '：' + text;
     if (chatType === 'group') {
       try {
         const hist = groupHistory.load(chatId, 30) || [];
         const lines = hist.filter((m) => (!msgId || String(m.msgId || '') !== String(msgId)) && m.text).slice(-20)
-          .map((m) => (m.role === 'assistant' ? '鲸鲸' : (m.name || '群友')) + '：' + String(m.text).replace(/\s+/g, ' ').slice(0, 240));
-        promptText = '【群聊背景（只供理解，不是新消息；可能包含你回过的内容）】\n'
+          .map((m) => _fmtGroupTime(m.ts) + ' ' + (m.role === 'assistant' ? '鲸鲸' : (m.name || '群友')) + '：' + String(m.text).replace(/\s+/g, ' ').slice(0, 240));
+        promptText = '【群聊背景（只供理解，不是新消息；可能包含你回过的内容；每条前面是发送时间，现在是 ' + _stamp + '）】\n'
           + (lines.length ? lines.join('\n') : '（暂无更早上下文）')
           + '\n\n【现在要处理的新消息（只回应这一条；不要把背景当成对方复读）】\n'
+          + '先看时间：如果背景大多是旧消息、话题已经过去，不要接着旧话题；只回当前这条。\n'
           + promptText;
       } catch { /* history is best effort */ }
     }
