@@ -3,6 +3,7 @@ import path from 'node:path';
 import { execFile, spawn } from 'node:child_process';
 
 export const SERVICE_NAMES = ['qq-transport', 'wechat-bridge'];
+let bridgeSupervisor = null;
 
 /**
  * Pure pre-flight guard. Kept free of I/O so it can be unit tested.
@@ -93,6 +94,31 @@ function launch(command, args, options) {
   child.unref();
 }
 
+function startBridgeSupervisor(python, ctx) {
+  if (bridgeSupervisor) return;
+  const stopFlag = path.join(ctx.root, 'data', 'bridge-stop.flag');
+  const env = { ...process.env, WHALE_PYTHON: python, WHALE_BOT_URL: 'http://127.0.0.1:8788/webhook/wechat' };
+  const start = () => {
+    if (fs.existsSync(stopFlag)) { bridgeSupervisor = null; return; }
+    const child = spawn(python, [path.join(ctx.root, 'examples', 'wechatauto_bridge.py')], {
+      cwd: ctx.root,
+      env,
+      stdio: 'ignore',
+      windowsHide: true,
+    });
+    bridgeSupervisor = child;
+    child.on('error', () => {
+      if (bridgeSupervisor === child) bridgeSupervisor = null;
+      if (!fs.existsSync(stopFlag)) setTimeout(start, 5000);
+    });
+    child.on('exit', () => {
+      if (bridgeSupervisor === child) bridgeSupervisor = null;
+      if (!fs.existsSync(stopFlag)) setTimeout(start, 5000);
+    });
+  };
+  start();
+}
+
 export async function startService(name, ctx, body = {}) {
   const state = await getServices(ctx);
   const bridgeRunning = name === 'wechat-bridge'
@@ -113,10 +139,7 @@ export async function startService(name, ctx, body = {}) {
         return { ok: false, status: 500, error: '找不到 Python：' + python };
       }
       fs.rmSync(path.join(ctx.root, 'data', 'bridge-stop.flag'), { force: true });
-      launch(python, [path.join(ctx.root, 'examples', 'wechatauto_bridge.py')], {
-        cwd: ctx.root,
-        env: { ...process.env, WHALE_BOT_URL: 'http://127.0.0.1:8788/webhook/wechat' },
-      });
+      startBridgeSupervisor(python, ctx);
     }
     try {
       fs.appendFileSync(

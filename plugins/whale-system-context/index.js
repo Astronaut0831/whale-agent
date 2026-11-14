@@ -29,7 +29,7 @@ function legacyContextText(env) {
 
 function addSection(systemPrompt, text) {
   if (text && systemPrompt && typeof systemPrompt.section === 'function') {
-    systemPrompt.section({ name: 'whale-context', order: 90, text });
+    systemPrompt.section({ name: 'whale-context', order: 110, text });
   }
 }
 
