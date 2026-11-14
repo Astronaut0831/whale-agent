@@ -4241,8 +4241,8 @@ def main():
     def warmup():
         """启动后预热发送通道，避免第一条回复慢 5~10 秒。"""
         time.sleep(3)
-        if game_running():
-            log("游戏在运行，跳过发送通道预热")
+        if game_running() or user_active():
+            log("游戏/你在用电脑，跳过发送通道预热")
             return
         try:
             nonlocal gui
@@ -4355,7 +4355,7 @@ def main():
             try:
                 # 游戏在跑时桥接会跳过预热、进休息模式，这时 UIA 还没初始化，
                 # 不能当成「UIA 坏了」上报 —— 不然网页会误报「消息发不出去」。
-                resting = bool(game_running())
+                resting = bool(game_running() or user_active())
                 # 不用等消息才去唤醒引擎：心跳每 20 秒问一次（库内部 30 秒节流、
                 # 会自动重新热激活），这样状态是真实的，也能顺手把假死的引擎救回来。
                 uia_now = None
